@@ -285,6 +285,15 @@ LOG_LEVEL=DEBUG
 
 This enables detailed LLM call logging including token counts, durations, and finish reasons. Watch for warnings like `Duration too long` or `Finish reason: length` (truncated responses).
 
+## Documentation
+
+| Guide | Description |
+|-------|------------|
+| [Model Configuration](docs/model/model-configuration-guide.md) | How to configure LLM / VLM / Embedding models, use CLIProxyAPI to convert CLI subscriptions, .env vs UI settings |
+| [Memory Operations](docs/memory/memory-operations-guide.md) | Import old chats, backfill memory, view/edit friend profiles, profile regeneration |
+| [Chat Record Acquisition](docs/chat_record/old-chat-record-acquisition.md) | Validated pipeline for exporting WeChat old chat records via MemoTrace |
+| [Visual Monitor Debugging](docs/visual_monitor/visual-monitor-debugging-guide.md) | ROI tuning, screenshot frequency, debug mode, cached image inspection |
+
 ## Project Structure
 
 ```
