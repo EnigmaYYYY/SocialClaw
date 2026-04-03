@@ -1,0 +1,894 @@
+/**
+ * Social Copilot Styles
+ *
+ * Implements responsive layout with minimum 800px width
+ * Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+/* ============================================================================
+   App Layout
+   ============================================================================ */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background-color: #fff;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.status-indicator {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.status-indicator.checking {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-indicator.connected {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-indicator.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.app-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 200px 1fr 300px;
+  gap: 16px;
+  padding: 16px;
+  min-width: 800px;
+}
+
+/* ============================================================================
+   Ollama Error Banner
+   ============================================================================ */
+
+.ollama-error-banner {
+  padding: 16px 24px;
+  background-color: #f8d7da;
+  border-bottom: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.ollama-error-banner .error-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ollama-error-banner .error-icon {
+  font-size: 18px;
+}
+
+.ollama-error-banner .error-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ollama-error-banner .error-troubleshooting {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.ollama-error-banner .error-troubleshooting p {
+  margin-bottom: 8px;
+}
+
+.ollama-error-banner .error-troubleshooting ol {
+  margin-left: 20px;
+  margin-bottom: 12px;
+}
+
+.ollama-error-banner .error-troubleshooting li {
+  margin-bottom: 4px;
+}
+
+.ollama-error-banner .error-troubleshooting code {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.ollama-error-banner .retry-button {
+  padding: 8px 16px;
+  background-color: #721c24;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.ollama-error-banner .retry-button:hover {
+  background-color: #5a1a1d;
+}
+
+/* ============================================================================
+   Risk Warning Banner
+   ============================================================================ */
+
+.risk-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background-color: #fff3cd;
+  border-bottom: 1px solid #ffc107;
+  color: #856404;
+}
+
+.risk-warning-banner .warning-icon {
+  font-size: 18px;
+}
+
+.risk-warning-banner .warning-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   Contact Selector
+   ============================================================================ */
+
+.contact-selector {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+}
+
+.contact-selector h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #555;
+}
+
+.contact-list {
+  list-style: none;
+}
+
+.contact-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-bottom: 4px;
+  position: relative;
+}
+
+.contact-item:hover {
+  background-color: #f0f0f0;
+}
+
+.contact-item.selected {
+  background-color: #e3f2fd;
+  border-left: 3px solid #2196f3;
+}
+
+.contact-item.suspicious {
+  border-left: 3px solid #ffc107;
+}
+
+.contact-item.suspicious.selected {
+  border-left: 3px solid #ff9800;
+}
+
+.contact-name {
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.suspicious-badge {
+  font-size: 12px;
+  cursor: help;
+}
+
+.contact-summary {
+  font-size: 12px;
+  color: #666;
+  margin-top: 6px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.loading-contacts {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+
+.empty-state {
+  color: #999;
+  font-size: 14px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* ============================================================================
+   Chat Input Area
+   ============================================================================ */
+
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-input-area {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.chat-input-area h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #555;
+}
+
+.chat-input-area textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.chat-input-area textarea:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.chat-input-area textarea.error {
+  border-color: #dc3545;
+}
+
+.chat-input-area textarea:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.validation-error {
+  color: #dc3545;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.input-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.input-actions button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.input-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.input-actions button:not(.primary) {
+  background-color: #e9ecef;
+  color: #495057;
+}
+
+.input-actions button:not(.primary):hover:not(:disabled) {
+  background-color: #dee2e6;
+}
+
+.input-actions button.primary {
+  background-color: #2196f3;
+  color: #fff;
+}
+
+.input-actions button.primary:hover:not(:disabled) {
+  background-color: #1976d2;
+}
+
+/* ============================================================================
+   Suggestion Panel
+   ============================================================================ */
+
+.suggestion-panel {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+}
+
+.suggestion-panel h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #555;
+}
+
+/* Loading Indicator */
+.loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 30px 0;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #2196f3;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-indicator span {
+  color: #666;
+  font-size: 14px;
+}
+
+/* Intent Summary */
+.intent-summary {
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.intent-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.intent-item:last-child {
+  margin-bottom: 0;
+}
+
+.intent-item .label {
+  color: #666;
+  min-width: 40px;
+}
+
+.intent-item .value {
+  color: #333;
+  font-weight: 500;
+}
+
+/* Suggestions List */
+.suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.suggestion-card {
+  background-color: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.suggestion-card:hover {
+  border-color: #2196f3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
+}
+
+.suggestion-card.copied {
+  border-color: #4caf50;
+  background-color: #e8f5e9;
+}
+
+.suggestion-content {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.suggestion-reason {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+  padding-top: 10px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.copy-hint {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 11px;
+  color: #999;
+  transition: color 0.2s;
+}
+
+.suggestion-card:hover .copy-hint {
+  color: #2196f3;
+}
+
+.suggestion-card.copied .copy-hint {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   Responsive Adjustments
+   ============================================================================ */
+
+@media (max-width: 900px) {
+  .app-main {
+    grid-template-columns: 180px 1fr 260px;
+  }
+}
+
+
+/* ============================================================================
+   Header Actions
+   ============================================================================ */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-button {
+  padding: 6px 12px;
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-button:hover {
+  background-color: #e0e0e0;
+  border-color: #ccc;
+}
+
+/* ============================================================================
+   Settings Panel Overlay
+   ============================================================================ */
+
+.settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.settings-panel {
+  background-color: #fff;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  position: sticky;
+  top: 0;
+  background-color: #fff;
+  z-index: 1;
+}
+
+.settings-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #666;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-button:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.settings-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+}
+
+.settings-content {
+  padding: 20px;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.settings-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+/* ============================================================================
+   Form Elements
+   ============================================================================ */
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-group > label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.form-hint {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-top: 6px;
+}
+
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.radio-label input[type="radio"] {
+  cursor: pointer;
+}
+
+/* ============================================================================
+   Phrase Tags
+   ============================================================================ */
+
+.phrase-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-height: 32px;
+}
+
+.phrase-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background-color: #e3f2fd;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #1976d2;
+}
+
+.remove-phrase {
+  background: none;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  color: #1976d2;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.remove-phrase:hover {
+  opacity: 1;
+}
+
+.add-phrase {
+  display: flex;
+  gap: 8px;
+}
+
+.add-phrase input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.add-phrase input:focus {
+  outline: none;
+  border-color: #2196f3;
+}
+
+.add-phrase button {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.add-phrase button:hover:not(:disabled) {
+  background-color: #1976d2;
+}
+
+.add-phrase button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+   Settings Actions
+   ============================================================================ */
+
+.settings-actions {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.save-button {
+  padding: 10px 24px;
+  background-color: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.save-button:hover:not(:disabled) {
+  background-color: #1976d2;
+}
+
+.save-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.save-button.success {
+  background-color: #4caf50;
+}
+
+.save-button.error {
+  background-color: #f44336;
+}
+
+.save-error {
+  color: #f44336;
+  font-size: 13px;
+}
+
+.settings-error {
+  padding: 40px;
+  text-align: center;
+}
+
+.settings-error p {
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.settings-error button {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+
+/* ============================================================================
+   App Loading and Error Screens
+   ============================================================================ */
+
+.app-loading,
+.app-error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: #f5f5f5;
+}
+
+.loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px;
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+
+.loading-screen .spinner {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
+}
+
+.loading-screen span {
+  font-size: 16px;
+  color: #666;
+}
+
+.error-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px;
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  max-width: 400px;
+}
+
+.error-screen .error-icon {
+  font-size: 48px;
+}
+
+.error-screen h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+}
+
+.error-screen p {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.error-screen button {
+  padding: 10px 24px;
+  background-color: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.error-screen button:hover {
+  background-color: #1976d2;
+}

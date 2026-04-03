@@ -1,0 +1,1154 @@
+/**
+ * FloatingWindow Styles
+ *
+ * Compact floating window layout for Social Copilot
+ * Requirements: 2.1, 2.4, 2.5, 6.1, 6.2, 9.2, 9.5, 10.2
+ */
+
+/* ============================================================================
+   Floating Window Container
+   ============================================================================ */
+
+.floating-window {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ============================================================================
+   Draggable Header
+   ============================================================================ */
+
+.floating-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  cursor: grab;
+}
+
+.floating-header:active {
+  cursor: grabbing;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-icon {
+  font-size: 18px;
+}
+
+.app-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.header-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.header-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.minimize-btn {
+  font-weight: bold;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ============================================================================
+   Status Indicator Bar
+   ============================================================================ */
+
+.status-indicator-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.status-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-icon {
+  font-size: 12px;
+}
+
+.status-text {
+  font-weight: 500;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #666;
+}
+
+.contact-label {
+  font-size: 10px;
+}
+
+.contact-name {
+  font-weight: 500;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status variants */
+.status-monitoring {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-loading {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.status-error {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.status-connected {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.status-idle {
+  background: #f5f5f5;
+  color: #757575;
+}
+
+/* ============================================================================
+   Risk Warning Banner
+   ============================================================================ */
+
+.risk-warning-banner-compact {
+  padding: 8px 12px;
+  font-size: 11px;
+}
+
+.risk-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.risk-icon {
+  font-size: 14px;
+}
+
+.risk-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.risk-message {
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+/* Risk level variants */
+.risk-high {
+  background: linear-gradient(135deg, #ff5252 0%, #f44336 100%);
+  color: white;
+}
+
+.risk-medium {
+  background: linear-gradient(135deg, #ffb74d 0%, #ff9800 100%);
+  color: #3e2723;
+}
+
+.risk-low {
+  background: linear-gradient(135deg, #fff176 0%, #ffc107 100%);
+  color: #3e2723;
+}
+
+/* ============================================================================
+   Main Content Area
+   ============================================================================ */
+
+.floating-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Intent Summary */
+.intent-summary-compact {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.intent-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.intent-row:last-child {
+  margin-bottom: 0;
+}
+
+.intent-label {
+  color: #666;
+  min-width: 36px;
+}
+
+.intent-value {
+  color: #333;
+  font-weight: 500;
+}
+
+/* Loading State */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 12px;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-state span {
+  font-size: 13px;
+  color: #666;
+}
+
+/* Empty State */
+.empty-state-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 8px;
+}
+
+.empty-icon {
+  font-size: 32px;
+  opacity: 0.5;
+}
+
+.empty-text {
+  font-size: 13px;
+  color: #999;
+}
+
+/* Error State */
+.error-state-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px 20px;
+  gap: 8px;
+  background: #ffebee;
+  border-radius: 8px;
+}
+
+.error-state-compact .error-icon {
+  font-size: 24px;
+}
+
+.error-state-compact .error-text {
+  font-size: 12px;
+  color: #c62828;
+  text-align: center;
+}
+
+/* ============================================================================
+   Suggestion Cards Container
+   ============================================================================ */
+
+.suggestions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ============================================================================
+   Suggestion Card
+   ============================================================================ */
+
+.suggestion-card-compact {
+  position: relative;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.suggestion-card-compact:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-1px);
+}
+
+.suggestion-card-compact.copied {
+  border-color: #4caf50;
+  background: #e8f5e9;
+}
+
+.shortcut-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: #f0f0f0;
+  color: #666;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+.suggestion-card-compact:hover .shortcut-badge {
+  background: #667eea;
+  color: white;
+}
+
+.suggestion-card-compact.copied .shortcut-badge {
+  background: #4caf50;
+  color: white;
+}
+
+.card-content {
+  margin-bottom: 8px;
+  padding-right: 40px;
+}
+
+.suggestion-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #333;
+  margin: 0;
+  word-break: break-word;
+}
+
+.card-reason {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.reason-label {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.reason-text {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.copy-indicator {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 10px;
+}
+
+.copy-text {
+  color: #999;
+}
+
+.copied-text {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.suggestion-card-compact:hover .copy-text {
+  color: #667eea;
+}
+
+/* ============================================================================
+   Shortcut Hint Footer
+   ============================================================================ */
+
+.shortcut-hint {
+  padding: 6px 12px;
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+  text-align: center;
+}
+
+.shortcut-hint span {
+  font-size: 10px;
+  color: #999;
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+/* ============================================================================
+   Minimized Bubble
+   ============================================================================ */
+
+.minimized-bubble {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.minimized-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.bubble-icon {
+  font-size: 24px;
+}
+
+/* Status dot */
+.status-dot {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid white;
+}
+
+.status-dot.monitoring {
+  background: #4caf50;
+}
+
+.status-dot.loading {
+  background: #ff9800;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.status-dot.error {
+  background: #f44336;
+}
+
+.status-dot.connected {
+  background: #2196f3;
+}
+
+.status-dot.idle {
+  background: #9e9e9e;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Notification badge */
+.notification-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f44336;
+  color: white;
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  animation: bounce 0.5s ease-in-out;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+/* Loading ring */
+.bubble-loading-ring {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  border: 2px solid transparent;
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Bubble status variants */
+.bubble-error {
+  background: linear-gradient(135deg, #ff5252 0%, #f44336 100%);
+}
+
+.bubble-loading {
+  background: linear-gradient(135deg, #ffb74d 0%, #ff9800 100%);
+}
+
+/* ============================================================================
+   Copy Toast Notification
+   ============================================================================ */
+
+.copy-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideUp 0.3s ease;
+  z-index: 1000;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.copy-toast-icon {
+  font-size: 16px;
+}
+
+/* ============================================================================
+   Scrollbar Styling
+   ============================================================================ */
+
+.floating-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.floating-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.floating-content::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 3px;
+}
+
+.floating-content::-webkit-scrollbar-thumb:hover {
+  background: #b0b0b0;
+}
+
+
+/* ============================================================================
+   Copy Toast Animation States
+   ============================================================================ */
+
+.copy-toast.visible {
+  animation: slideUp 0.3s ease forwards;
+}
+
+.copy-toast.hiding {
+  animation: slideDown 0.3s ease forwards;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+}
+
+
+/* ============================================================================
+   Settings Panel Styles
+   Requirements: 11.1, 11.2, 11.3, 11.4
+   ============================================================================ */
+
+/* Overlay */
+.settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Panel Container */
+.settings-panel {
+  width: 90%;
+  max-width: 400px;
+  max-height: 85vh;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header */
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-close-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.settings-close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Tabs */
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f8f9fa;
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.settings-tab:hover {
+  color: #333;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.settings-tab.active {
+  color: #667eea;
+}
+
+.settings-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #667eea;
+}
+
+/* Content */
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Section */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Group */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-group-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.settings-group-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.settings-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #999;
+  font-style: italic;
+}
+
+/* Toggle Row */
+.settings-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border: none;
+  border-radius: 12px;
+  background: #ccc;
+  cursor: pointer;
+  transition: background 0.3s;
+  padding: 0;
+}
+
+.toggle-switch.active {
+  background: #667eea;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s;
+}
+
+.toggle-switch.active .toggle-slider {
+  transform: translateX(20px);
+}
+
+/* Radio Group */
+.settings-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.settings-radio:hover {
+  background: #f0f0f0;
+}
+
+.settings-radio input[type="radio"] {
+  margin-top: 3px;
+  accent-color: #667eea;
+}
+
+.radio-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radio-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.radio-desc {
+  font-size: 11px;
+  color: #666;
+}
+
+/* Info Row */
+.settings-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.info-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.info-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+/* JSON Editor */
+.json-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.json-editor {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fafafa;
+  color: #333;
+  transition: border-color 0.2s;
+}
+
+.json-editor:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+}
+
+.json-editor.has-error {
+  border-color: #f44336;
+  background: #fff8f8;
+}
+
+.json-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #ffebee;
+  border-radius: 6px;
+  color: #c62828;
+}
+
+.json-error .error-icon {
+  font-size: 14px;
+}
+
+.json-error .error-text {
+  font-size: 12px;
+}
+
+.json-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+/* Profile Help */
+.profile-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.help-item {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.help-field {
+  font-family: 'SF Mono', Monaco, monospace;
+  color: #667eea;
+  min-width: 200px;
+}
+
+.help-desc {
+  color: #666;
+}
+
+/* Scrollbar for settings content */
+.settings-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.settings-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 3px;
+}
+
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: #b0b0b0;
+}
+
+/* Input Row - For EverMemOS Settings */
+.settings-input-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  gap: 12px;
+}
+
+.settings-input-row .input-label {
+  font-size: 13px;
+  color: #666;
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+.settings-input-row .settings-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  transition: border-color 0.2s;
+  min-width: 0;
+}
+
+.settings-input-row .settings-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.settings-input-row .settings-input::placeholder {
+  color: #aaa;
+}
+
+/* Settings Actions */
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.settings-actions .save-message {
+  font-size: 12px;
+  color: #666;
+}
+
+
+/* ============================================================================
+   Floating App Loading Screen
+   ============================================================================ */
+
+.floating-app-loading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 12px;
+}
+
+.floating-app-loading .loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.floating-app-loading span {
+  font-size: 14px;
+  color: #666;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv-visual-monitor/
+.env
+
+# Electron / Node
+frontend/node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Local monitor state
+memory/cache/
+memory/chat_records/
+memory/memory_library/
+
+# Local backend config and artifacts
+visual_monitor/config/local/
+test/
+tests/__pycache__/
+
+# Logs and temp files
+*.log
+tmp/

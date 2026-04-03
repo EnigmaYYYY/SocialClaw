@@ -1,0 +1,102 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#overlay-root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: 'IBM Plex Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.roi-overlay-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  background: rgba(15, 23, 42, 0.24);
+  user-select: none;
+}
+
+.roi-selection-preview {
+  position: absolute;
+  border: 2px solid #60a5fa;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.32);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.roi-selection-label {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(191, 219, 254, 0.8);
+  background: rgba(239, 246, 255, 0.96);
+  color: #1e3a8a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.roi-toolbar {
+  position: absolute;
+  right: 20px;
+  bottom: 72px;
+  width: 420px;
+  border-radius: 16px;
+  border: 1px solid #cbd5e1;
+  background: rgba(248, 250, 252, 0.96);
+  box-shadow: 0 26px 50px rgba(15, 23, 42, 0.25);
+  padding: 14px;
+  cursor: default;
+}
+
+.roi-toolbar-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.roi-toolbar-message {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+  min-height: 34px;
+}
+
+.roi-toolbar-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.roi-toolbar-actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.roi-toolbar-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.roi-toolbar-actions button.primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}

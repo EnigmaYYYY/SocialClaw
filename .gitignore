@@ -1,0 +1,40 @@
+# Runtime state
+.socialclaw-stack/
+.socialclaw-logs/
+memory/cache/
+memory/chat_records/
+memory/memory_library/
+social_copilot/log/
+
+# Python
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Frontend
+node_modules/
+dist/
+
+# Local env files (keep .example and .template)
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Learnings & session history (internal)
+.learnings/
+.claude/
+.codex/

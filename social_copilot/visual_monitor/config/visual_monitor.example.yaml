@@ -1,0 +1,102 @@
+monitor:
+  mode: adaptive
+  roi:
+    x: 120
+    y: 240
+    w: 680
+    h: 900
+  capture_exclusion_regions: []  # absolute screen regions masked out before OCR/VLM
+  roi_strategy:
+    mode: hybrid
+    auto:
+      coarse_left_ratio: 0.27
+      coarse_top_ratio: 0.0
+      coarse_width_ratio: 0.71
+      coarse_height_ratio: 0.92
+      min_width: 320
+      min_height: 420
+      confidence_threshold: 0.72
+  fps:
+    idle: 1
+    active_min: 2
+    active_max: 4
+    burst: 5
+  thresholds:
+    hash_similarity_skip: 0.99
+    ssim_change: 0.985
+    message_confidence_low: 0.6
+  vision:
+    mode: vlm_structured
+    strict_only: true
+    structured_prompt: "You are extracting chat messages from a screenshot. Return plain text only, one message per line."
+    incremental:
+      enabled: true
+      window_frames: 8
+      min_text_len: 2
+      time_text_filter_enabled: true
+    litellm:
+      enabled: false
+      base_url: "https://litellm.sii.sh.cn/v1"
+      model: "sii-Qwen3-VL-235B-A22B-Instruct"
+      api_key: ""  # Optional direct key. If empty, fallback to api_key_env.
+      api_key_env: SOCIAL_COPILOT_VLM_API_KEY
+      timeout_ms: 12000
+      max_tokens: 800
+      temperature: 0.0
+  output:
+    sse_enabled: true
+    poll_enabled: true
+  privacy:
+    debug_dump_enabled: false
+    debug_dump_dir: social_copilot_debug_frames  # default uses system temp dir when omitted
+    debug_dump_ttl_hours: 24
+  frame_cache:
+    enabled: false
+    cache_dir: test/images/live_cache
+    cache_all_frames: false
+    keep_processed_frames: false
+    deduplicate_kept_frames: true
+    dedup_similarity_threshold: 0.99
+    max_kept_frames: 0  # 0 means unlimited (testing default)
+    testing_mode: false  # when true, keep all cached artifacts for manual debugging /联调
+  performance:
+    latency_p95_ms: 1200
+    cpu_idle_max_percent: 8
+    cpu_active_max_percent: 25
+  window_gate:
+    enabled: false
+    app_name: WeChat
+    foreground_settle_seconds: 0.0
+    confirmation_samples: 3  # require N consecutive frontmost-app confirmations before capture
+    confirmation_interval_ms: 100  # delay between confirmations; use >0 to suppress fast app-switch jitter
+    auto_roi_from_window: false  # legacy compatibility switch
+    roi_left_ratio: 0.27
+    roi_top_ratio: 0.0
+    roi_width_ratio: 0.71
+    roi_height_ratio: 0.92
+  vlm_async:
+    enabled: true
+    max_concurrency: 8
+    max_queue: 32
+    drop_when_queue_full: true
+  assistant:
+    enabled: true
+    base_url: "https://litellm.sii.sh.cn/v1"
+    model: "sii-dsv3.1"
+    api_key: ""  # Optional direct key. If empty, fallback to api_key_env.
+    api_key_env: SOCIAL_COPILOT_AGENT_API_KEY
+    timeout_ms: 12000
+    temperature: 0.4
+    max_tokens: 800
+    suggestion_count: 3
+    max_messages: 24
+
+service:
+  host: 127.0.0.1
+  port: 18777
+  log_level: info
+  metrics_enabled: true
+
+integration:
+  electron_ipc_enabled: false
+  zmq_enabled: false
