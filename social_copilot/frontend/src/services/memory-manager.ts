@@ -971,6 +971,24 @@ export class MemoryManager {
           defaults.evermemos.backfillChunkSize
         )
       ),
+      backfillChunkTimeoutMs: Math.round(
+        this.getEnvNumber(
+          'SOCIAL_COPILOT_EVERMEMOS_BACKFILL_CHUNK_TIMEOUT_MS',
+          defaults.evermemos.backfillChunkTimeoutMs
+        )
+      ),
+      backfillMaxRetryPerChunk: Math.round(
+        this.getEnvNumber(
+          'SOCIAL_COPILOT_EVERMEMOS_BACKFILL_MAX_RETRY_PER_CHUNK',
+          defaults.evermemos.backfillMaxRetryPerChunk
+        )
+      ),
+      backfillMinChunkSize: Math.round(
+        this.getEnvNumber(
+          'SOCIAL_COPILOT_EVERMEMOS_BACKFILL_MIN_CHUNK_SIZE',
+          defaults.evermemos.backfillMinChunkSize
+        )
+      ),
       llm: {
         ...defaults.evermemos.llm,
         baseUrl: this.getEnvString('LLM_BASE_URL') ?? defaults.evermemos.llm.baseUrl,

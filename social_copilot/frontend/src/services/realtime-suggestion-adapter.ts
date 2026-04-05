@@ -256,23 +256,42 @@ export class RealtimeSuggestionAdapter {
   }
 
   async stopMonitoring(): Promise<void> {
-    if (!this.settings) {
-      this.suggestionsEnabled = false
-      this.sessionRounds.clear()
-      this.emitStatus('idle')
-      return
-    }
     this.suggestionsEnabled = false
     this.sessionRounds.clear()
-    if (this.settings) {
-      const baseUrl = this.settings.visualMonitor.apiBaseUrl?.trim() || 'http://127.0.0.1:18777'
+    let baseUrl = this.settings?.visualMonitor.apiBaseUrl?.trim() || ''
+    if (!baseUrl) {
       try {
-        await fetch(`${baseUrl}/monitor/stop`, { method: 'POST' })
+        const loadedSettings = await window.electronAPI.settings.load()
+        this.settings = loadedSettings
+        baseUrl = loadedSettings.visualMonitor.apiBaseUrl?.trim() || ''
+      } catch {
+        // best-effort shutdown with default endpoint
+      }
+    }
+    const primaryBaseUrl = baseUrl || 'http://127.0.0.1:18777'
+    const fallbackBaseUrl = 'http://127.0.0.1:18777'
+    const stopTargets =
+      primaryBaseUrl === fallbackBaseUrl ? [primaryBaseUrl] : [primaryBaseUrl, fallbackBaseUrl]
+
+    let drainBaseUrl = primaryBaseUrl
+    for (const target of stopTargets) {
+      try {
+        const response = await fetch(`${target}/monitor/stop`, { method: 'POST' })
+        if (response.ok) {
+          drainBaseUrl = target
+          break
+        }
       } catch {
         // best-effort shutdown
       }
     }
+    try {
+      await this.drainMonitorEventsUntilIdle(drainBaseUrl)
+    } catch {
+      // best-effort backlog drain
+    }
     this.patchDebug({
+      monitorRunning: false,
       monitorLastError: '',
       monitorLastDecisionReason: '',
     })
@@ -380,7 +399,7 @@ export class RealtimeSuggestionAdapter {
   }
 
   private async tick(): Promise<void> {
-    if (!this.running || !this.settings) {
+    if (!this.running || !this.settings || !this.suggestionsEnabled) {
       return
     }
     const baseUrl = this.settings.visualMonitor.apiBaseUrl?.trim() || 'http://127.0.0.1:18777'
@@ -395,7 +414,7 @@ export class RealtimeSuggestionAdapter {
       })
 
       await this.fetchMonitorDebug(baseUrl)
-      if (this.debugState.monitorRunning) {
+      if (this.suggestionsEnabled && this.debugState.monitorRunning) {
         this.emitStatus('monitoring')
       }
       if (events.length === 0) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   RealtimeSuggestionAdapter,
   type AdapterStatus
@@ -336,33 +336,33 @@ export function resolveAssistantExpandedFlag(
 }
 
 function inferToneLabel(content: string, reason: string): string {
-  const combined = `${content} ${reason}`
-  if (/先别|谨慎|防御|降压|冷一下|别直接/.test(combined)) {
-    return '先别回这个'
+  const combined = `${content} ${reason}`.toLowerCase()
+  if (/risk|cautious|careful|don't|do not/.test(combined)) {
+    return '谨慎'
   }
-  if (/安抚|接住|理解|担心|缓和|先顺/.test(combined)) {
-    return '先接住'
+  if (/empathy|understand|support|comfort/.test(combined)) {
+    return '安抚'
   }
-  if (/推进|确认|约|主动|落地|明确/.test(combined)) {
-    return '可以推进'
+  if (/confirm|next step|plan|action/.test(combined)) {
+    return '推进'
   }
-  if (/轻松|玩笑|松弛|俏皮/.test(combined)) {
-    return '轻一点'
+  if (/light|casual|funny|joke/.test(combined)) {
+    return '轻松'
   }
-  if (/稳|安全|收一收|别太满|更稳/.test(combined)) {
-    return '稳一点'
+  if (/safe|stable|steady/.test(combined)) {
+    return '稳妥'
   }
-  return '给个台阶'
+  return '建议'
 }
 
 function normalizeSupportedAppName(rawName: string | null): string | null {
   if (!rawName) {
     return null
   }
-  if (/wechat|weixin|微信/i.test(rawName)) {
+  if (/wechat|weixin/i.test(rawName)) {
     return 'WeChat'
   }
-  if (/企业微信/i.test(rawName)) {
+  if (/wecom|wxwork/i.test(rawName)) {
     return 'WeCom'
   }
   if (/discord/i.test(rawName)) {
@@ -420,11 +420,11 @@ function inferSocialRisk(
     return 'low'
   }
 
-  const combined = `${suggestion.content} ${suggestion.reason} ${suggestion.toneLabel ?? ''}`
-  if (/先别|谨慎|风险|敏感|防御|降压|高压|别直接/.test(combined)) {
+  const combined = `${suggestion.content} ${suggestion.reason} ${suggestion.toneLabel ?? ''}`.toLowerCase()
+  if (/risk|sensitive|cautious|careful|don't|do not/.test(combined)) {
     return 'high'
   }
-  if (/稳|安抚|接住|收一收|缓和|等一下|观察/.test(combined)) {
+  if (/empathy|comfort|support|safe|stable|steady/.test(combined)) {
     return 'medium'
   }
   return 'low'
@@ -452,24 +452,24 @@ function createStatusSummary(
 
   if (assistantState === 'error') {
     return {
-      signal: '连接有波动',
+      signal: '连接波动',
       posture: '谨慎模式',
-      strategy: '先别依赖建议'
+      strategy: '先不要依赖建议'
     }
   }
 
   if (assistantState === 'monitoring' && !suggestionEnabled) {
     return {
       signal: '建议已暂停',
-      posture: '仅监测',
+      posture: '仅监控',
       strategy: '可随时恢复建议'
     }
   }
 
   if (assistantState === 'monitoring' && hasSuggestions) {
     return {
-      signal: risk === 'high' ? '情绪密度偏高' : '有一条可用回应',
-      posture: risk === 'high' ? '先降压' : '可顺势回应',
+      signal: risk === 'high' ? '风险偏高' : '有可用建议',
+      posture: risk === 'high' ? '先降压' : '可顺势回复',
       strategy: risk === 'high' ? '先别回太满' : '先发最稳的一句'
     }
   }
@@ -478,7 +478,7 @@ function createStatusSummary(
     return {
       signal: currentAppName ? `当前应用 ${currentAppName}` : '等待聊天应用',
       posture: gatePassed ? '等待新消息' : '等待进入可识别会话',
-      strategy: currentAppName ? '当前无建议' : '打开支持的聊天应用后开始工作'
+      strategy: currentAppName ? '当前暂无建议' : '打开受支持聊天应用后开始工作'
     }
   }
 
@@ -488,7 +488,6 @@ function createStatusSummary(
     strategy: '打开聊天后显示建议'
   }
 }
-
 function reorderSuggestions(
   suggestions: SuggestionViewItem[],
   highlightedIndex: number
@@ -600,12 +599,16 @@ export function AssistantBubbleApp(): JSX.Element {
     setExpanded(isExpandedBounds(bounds))
   }, [])
 
+  type CollapseReason = 'init' | 'manual' | 'stop' | 'shutdown'
+
   const syncExpandedState = useCallback(
-    async (nextExpanded: boolean) => {
+    async (nextExpanded: boolean, collapseReason?: CollapseReason) => {
+      if (!nextExpanded && !collapseReason) {
+        return
+      }
       try {
         const bounds = await window.electronAPI.assistantWindow.setExpanded(nextExpanded)
         if (!bounds) {
-          setExpanded(false)
           return
         }
         applyWindowBounds(bounds)
@@ -821,7 +824,7 @@ export function AssistantBubbleApp(): JSX.Element {
 
   const collapseToPet = useCallback(async (): Promise<void> => {
     setSurfacePreference('auto')
-    await syncExpandedState(false)
+    await syncExpandedState(false, 'manual')
   }, [syncExpandedState])
 
   const openSuggestionCard = useCallback(async (): Promise<void> => {
@@ -904,7 +907,7 @@ export function AssistantBubbleApp(): JSX.Element {
         windowBoundsRef.current = bounds
       }
     })
-    void syncExpandedState(false)
+    void syncExpandedState(false, 'init')
     return () => {
       disposed = true
       void adapter.stop()
@@ -921,13 +924,6 @@ export function AssistantBubbleApp(): JSX.Element {
       stopDragging()
     }
   }, [clearMotionTimers, stopDragging, syncExpandedState])
-
-  useEffect(() => {
-    if (!expanded || surfacePreference !== 'auto' || orderedSuggestions.length > 0 || promptVisible) {
-      return
-    }
-    void syncExpandedState(false)
-  }, [expanded, orderedSuggestions.length, promptVisible, surfacePreference, syncExpandedState])
 
   useEffect(() => {
     if (!currentAppName) {
@@ -989,11 +985,17 @@ export function AssistantBubbleApp(): JSX.Element {
       return
     }
     setErrorMessage(null)
-    await adapter.start()
     setSuggestionEnabled(true)
     setPromptVisible(false)
     setSurfacePreference('auto')
     await syncExpandedState(true)
+    try {
+      await adapter.start()
+    } catch (error) {
+      setSuggestionEnabled(false)
+      const message = error instanceof Error ? error.message : '启动建议失败'
+      setErrorMessage(message)
+    }
   }, [syncExpandedState])
 
   const stopAssistant = useCallback(async (): Promise<void> => {
@@ -1012,7 +1014,7 @@ export function AssistantBubbleApp(): JSX.Element {
     lastPromptedAppRef.current = null
     setErrorMessage(null)
     setSurfacePreference('auto')
-    await syncExpandedState(false)
+    await syncExpandedState(false, 'stop')
   }, [syncExpandedState])
 
   const shutdownAssistant = useCallback(async (): Promise<void> => {
@@ -1030,7 +1032,7 @@ export function AssistantBubbleApp(): JSX.Element {
     lastPromptedAppRef.current = null
     setErrorMessage(null)
     setSurfacePreference('auto')
-    await syncExpandedState(false)
+    await syncExpandedState(false, 'shutdown')
   }, [syncExpandedState])
 
   const skipCurrentRound = useCallback(async (): Promise<void> => {
@@ -1096,9 +1098,13 @@ export function AssistantBubbleApp(): JSX.Element {
     syncExpandedState
   ])
 
+  const showWhisperStage = expanded && petView.surfaceMode === 'whispers' && Boolean(activeSuggestion)
+  const showPromptStage = expanded && promptVisible && !activeSuggestion && surfacePreference === 'auto'
+  const showFolioStage = expanded && !showWhisperStage && !showPromptStage
+
   return (
     <main className={`assistant-shell tone-${petView.accentTone} surface-${petView.surfaceMode}`}>
-      {expanded && petView.surfaceMode === 'whispers' && activeSuggestion && (
+      {showWhisperStage && activeSuggestion && (
         <section className="assistant-whisper-stage" aria-label="建议卡片">
           <article className="assistant-whisper-card">
             <header className="assistant-note-meta">
@@ -1116,10 +1122,10 @@ export function AssistantBubbleApp(): JSX.Element {
                   复制
                 </button>
                 <button type="button" onClick={cycleSuggestion} disabled={orderedSuggestions.length < 2}>
-                  换句
+                  换一句
                 </button>
                 <button type="button" onClick={() => void skipCurrentRound()}>
-                  跳过
+                  Skip
                 </button>
                 <button type="button" onClick={() => void openFolio()}>
                   展开
@@ -1130,12 +1136,12 @@ export function AssistantBubbleApp(): JSX.Element {
         </section>
       )}
 
-      {expanded && promptVisible && !activeSuggestion && surfacePreference === 'auto' && (
+      {showPromptStage && (
         <section className="assistant-prompt-stage" aria-label="开始建议提示">
           <article className="assistant-prompt-card">
             <header className="assistant-note-meta">
               <span className="assistant-tone-chip">{currentAppName ?? '聊天应用'}</span>
-              <span className="assistant-context-chip">社交帮手</span>
+              <span className="assistant-context-chip">社交助手</span>
             </header>
             <p className="assistant-whisper-copy">要开始这一轮聊天建议吗？</p>
             <p className="assistant-whisper-reason">开始后会为当前会话提供建议。</p>
@@ -1160,8 +1166,8 @@ export function AssistantBubbleApp(): JSX.Element {
         </section>
       )}
 
-      {expanded && petView.surfaceMode === 'folio' && (
-        <section className="assistant-folio" aria-label="社交帮手详情">
+      {showFolioStage && (
+        <section className="assistant-folio" aria-label="社交助手详情">
           <header className="assistant-folio-header">
             <div>
               <p className="assistant-folio-kicker">SocialClaw</p>
@@ -1190,7 +1196,7 @@ export function AssistantBubbleApp(): JSX.Element {
                   <header className="assistant-note-meta">
                     <span className="assistant-tone-chip">{petView.toneLabel}</span>
                     <span className="assistant-context-chip">
-                      {socialRisk === 'high' ? '高敏感场景' : socialRisk === 'medium' ? '稳一点' : '可顺势回应'}
+                      {socialRisk === 'high' ? '高敏感场景' : socialRisk === 'medium' ? '稳一点' : '可顺势回复'}
                     </span>
                   </header>
                   <h2>{petView.headline}</h2>
@@ -1245,8 +1251,8 @@ export function AssistantBubbleApp(): JSX.Element {
                       <button type="button" onClick={() => void startAssistant()}>
                         {assistantState === 'monitoring' && !suggestionEnabled ? '恢复建议' : '开始建议'}
                       </button>
-                      <button type="button" onClick={() => void shutdownAssistant()}>
-                        停止监测
+                      <button type="button" onClick={() => void stopAssistant()}>
+                        停止监控
                       </button>
                     </>
                   )}
@@ -1287,7 +1293,7 @@ export function AssistantBubbleApp(): JSX.Element {
               本轮先略过
             </button>
             <button type="button" onClick={() => void stopAssistant()}>
-              停止监测
+              停止监控
             </button>
           </footer>
         </section>
@@ -1302,7 +1308,7 @@ export function AssistantBubbleApp(): JSX.Element {
           lastInteractionRef.current = Date.now()
           playPetAction(PET_HOVER_ACTIONS[petView.petMood])
         }}
-        aria-label="展开或收起社交帮手"
+        aria-label="展开或收起社交助手"
       >
         {orderedSuggestions.length > 0 && petView.surfaceMode === 'pet' && (
           <span className="assistant-pet-badge">{Math.min(orderedSuggestions.length, 9)}</span>
@@ -1328,3 +1334,4 @@ export function AssistantBubbleApp(): JSX.Element {
     </main>
   )
 }
+

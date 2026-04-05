@@ -168,6 +168,9 @@ class PerformanceConfig(BaseModel):
 class WindowGateConfig(BaseModel):
     enabled: bool = False
     app_name: str = "WeChat"
+    app_aliases: list[str] = Field(
+        default_factory=lambda: ["WeChat", "\u5fae\u4fe1", "WeChatAppEx", "Weixin"]
+    )
     foreground_settle_seconds: float = Field(default=0.0, ge=0.0, le=5.0)
     confirmation_samples: int = Field(default=1, ge=1, le=5)
     confirmation_interval_ms: int = Field(default=0, ge=0, le=500)

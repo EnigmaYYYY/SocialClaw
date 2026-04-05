@@ -1,4 +1,3 @@
-# SocialClaw
 
 AI-powered social copilot that watches your chat screens, builds memory profiles, and suggests replies in real time.
 

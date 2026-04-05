@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -41,10 +41,10 @@ class SocialReplyAssistant:
             user_profile=user_profile,
             contact_profile=contact_profile,
         )
-        logger.info("🐳🐳🐳 System Prompt:\n%s", system_prompt)
-        logger.info("🐳🐳🐳 User Prompt:\n%s", user_prompt)
+        _terminal_trace("System Prompt", system_prompt)
+        _terminal_trace("User Prompt", user_prompt)
         raw = self._client.chat_completion(system_prompt=system_prompt, user_prompt=user_prompt)
-        logger.info("🐳🐳🐳 Model Response:\n%s", raw)
+        _terminal_trace("Model Response", raw)
         suggestions = _parse_suggestions(raw, expected=self._suggestion_count)
         return SocialReplyAssistantResult(
             suggestions=suggestions,
@@ -129,3 +129,9 @@ def _parse_suggestions(raw: str, expected: int) -> list[ReplySuggestion]:
     if len(suggestions) < expected:
         raise RuntimeError(f"suggestions_not_enough:expected={expected},actual={len(suggestions)}")
     return suggestions[:expected]
+
+
+def _terminal_trace(title: str, content: str) -> None:
+    prefix = f"🐳🐳🐳 [VisualMonitor][LLM] {title}:"
+    print(f"{prefix}\\n{content}")
+    logger.info("%s\\n%s", prefix, content)

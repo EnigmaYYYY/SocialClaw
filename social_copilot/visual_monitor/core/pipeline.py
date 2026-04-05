@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from difflib import SequenceMatcher
@@ -94,9 +94,10 @@ class SessionState:
 class VisualMonitorPipeline:
     _PENDING_CACHE_SUBDIR = "_pending"
     _chat_time_pattern = re.compile(r"^\d{1,2}:\d{2}$")
-    _chat_unread_suffix_pattern = re.compile(r"[（(]\d+[)）]\s*$")
+    _chat_unread_suffix_pattern = re.compile("[(\uFF08]\\d+[)\uFF09]\\s*$")
     _title_invisible_pattern = re.compile(r"[\u200b-\u200d\ufe0e\ufe0f]+")
     _title_text_char_pattern = re.compile(r"[A-Za-z0-9\u3400-\u9fff]")
+    _DEFAULT_WECHAT_APP_ALIASES = ("wechat", "weixin", "wechatappex", "\u5fae\u4fe1")
 
     def __init__(
         self,
@@ -179,9 +180,13 @@ class VisualMonitorPipeline:
             "last_frontmost_app_postcapture": "",
             "last_target_app": "",
             "last_gate_passed": None,
+            "last_gate_skip_reason": "",
             "last_roi": {},
             "last_roi_source": "",
             "last_roi_reason": "",
+            "last_capture_attempt_ts": "",
+            "capture_attempt_total": 0,
+            "last_capture_result": "",
             "last_changed": False,
             "last_events_emitted": 0,
             "last_vision_mode": "",
@@ -238,6 +243,7 @@ class VisualMonitorPipeline:
             self._debug_state["events_emitted_total"] = int(self._debug_state["events_emitted_total"]) + int(
                 events_emitted
             )
+            self._debug_state["last_capture_result"] = "skipped"
             self._debug_state["last_decision_reason"] = (
                 "capture_disabled_drain" if self._total_async_vlm_jobs() > 0 else "capture_disabled_idle"
             )
@@ -254,16 +260,20 @@ class VisualMonitorPipeline:
         # Foreground-gate policy is mandatory when window probing is available.
         # This keeps capture/OCR/VLM aligned with WeChat-active-only behavior.
         target_app_name = gate_cfg.app_name or "WeChat"
+        target_app_aliases = list(gate_cfg.app_aliases or [])
         self._debug_state["last_target_app"] = target_app_name
+        self._debug_state["last_gate_skip_reason"] = ""
         if self.window_probe is not None:
             frontmost_app = await asyncio.to_thread(self.window_probe.frontmost_app_name)
             self._debug_state["last_frontmost_app"] = frontmost_app or ""
-            if not self._app_matches(frontmost_app, target_app_name):
+            if not self._app_matches(frontmost_app, target_app_name, target_app_aliases):
                 self._foreground_gate_stable_app = None
                 self._foreground_gate_stable_since = None
                 self.metrics.window_gate_skipped_total.inc()
                 self._debug_state["gate_skipped_total"] = int(self._debug_state["gate_skipped_total"]) + 1
                 self._debug_state["last_gate_passed"] = False
+                self._debug_state["last_gate_skip_reason"] = "not_frontmost"
+                self._debug_state["last_capture_result"] = "skipped"
                 self._debug_state["last_gate_settle_elapsed_s"] = 0.0
                 self._debug_state["last_gate_settle_required_s"] = float(gate_cfg.foreground_settle_seconds)
                 cpu = self.cpu_provider()
@@ -294,6 +304,8 @@ class VisualMonitorPipeline:
                 self.metrics.window_gate_skipped_total.inc()
                 self._debug_state["gate_skipped_total"] = int(self._debug_state["gate_skipped_total"]) + 1
                 self._debug_state["last_gate_passed"] = False
+                self._debug_state["last_gate_skip_reason"] = "settling"
+                self._debug_state["last_capture_result"] = "skipped"
                 cpu = self.cpu_provider()
                 self.metrics.cpu_percent.set(cpu)
                 interval = self.scheduler.observe(
@@ -318,6 +330,7 @@ class VisualMonitorPipeline:
             confirmation_interval_s = max(0.0, float(gate_cfg.confirmation_interval_ms) / 1000.0)
             passed_recheck, frontmost_recheck = await self._confirm_frontmost_app(
                 target_app_name=target_app_name,
+                target_app_aliases=target_app_aliases,
                 samples=confirmation_samples,
                 interval_s=confirmation_interval_s,
             )
@@ -328,6 +341,8 @@ class VisualMonitorPipeline:
                 self.metrics.window_gate_skipped_total.inc()
                 self._debug_state["gate_skipped_total"] = int(self._debug_state["gate_skipped_total"]) + 1
                 self._debug_state["last_gate_passed"] = False
+                self._debug_state["last_gate_skip_reason"] = "recheck_failed"
+                self._debug_state["last_capture_result"] = "skipped"
                 cpu = self.cpu_provider()
                 self.metrics.cpu_percent.set(cpu)
                 interval = self.scheduler.observe(
@@ -364,6 +379,8 @@ class VisualMonitorPipeline:
         if roi_source in {"window_bounds", "auto"}:
             self.metrics.window_gate_auto_roi_total.inc()
 
+        self._debug_state["capture_attempt_total"] = int(self._debug_state["capture_attempt_total"]) + 1
+        self._debug_state["last_capture_attempt_ts"] = datetime.now(tz=timezone.utc).isoformat()
         capture_result = await asyncio.to_thread(self.capture_adapter.capture, roi)
         masked_raw = self._apply_capture_exclusion_regions(
             raw=capture_result.raw,
@@ -380,12 +397,14 @@ class VisualMonitorPipeline:
         if self.window_probe is not None:
             frontmost_postcapture = await asyncio.to_thread(self.window_probe.frontmost_app_name)
             self._debug_state["last_frontmost_app_postcapture"] = frontmost_postcapture or ""
-            if not self._app_matches(frontmost_postcapture, target_app_name):
+            if not self._app_matches(frontmost_postcapture, target_app_name, target_app_aliases):
                 self._foreground_gate_stable_app = None
                 self._foreground_gate_stable_since = None
                 self.metrics.window_gate_skipped_total.inc()
                 self._debug_state["gate_skipped_total"] = int(self._debug_state["gate_skipped_total"]) + 1
                 self._debug_state["last_gate_passed"] = False
+                self._debug_state["last_gate_skip_reason"] = "postcapture_mismatch"
+                self._debug_state["last_capture_result"] = "skipped"
                 cpu = self.cpu_provider()
                 self.metrics.cpu_percent.set(cpu)
                 interval = self.scheduler.observe(
@@ -485,6 +504,7 @@ class VisualMonitorPipeline:
             self._debug_state["events_emitted_total"] = int(self._debug_state["events_emitted_total"]) + int(
                 events_emitted
             )
+            self._debug_state["last_capture_result"] = "captured_no_change"
             self._debug_state["last_decision_reason"] = "no_change"
             return PipelineRunResult(next_interval_s=interval, events_emitted=events_emitted, changed=False)
 
@@ -572,6 +592,7 @@ class VisualMonitorPipeline:
             self._debug_state["events_emitted_total"] = int(self._debug_state["events_emitted_total"]) + int(
                 events_emitted
             )
+            self._debug_state["last_capture_result"] = "captured_changed"
             self._debug_state["last_decision_reason"] = "async_path"
             return PipelineRunResult(next_interval_s=interval, events_emitted=events_emitted, changed=True)
 
@@ -606,6 +627,10 @@ class VisualMonitorPipeline:
 
         if used_fallback:
             self.metrics.vision_fallback_total.inc()
+        if not bool(vlm_meta.get("parse_ok", False)) or bool(vlm_meta.get("error")):
+            self._debug_state["last_capture_result"] = "captured_vlm_failed"
+        else:
+            self._debug_state["last_capture_result"] = "captured_changed"
         events = self.assembler.assemble(
             parsed_messages=parsed,
             frame=frame,
@@ -658,7 +683,7 @@ class VisualMonitorPipeline:
             self.metrics.vlm_async_wait_total.inc()
             slot_opened = await self._wait_for_queue_slot(timeout_s=5.0)
             if not slot_opened:
-                # Soft overflow — enqueue anyway to avoid data loss.
+                # Soft overflow 鈥?enqueue anyway to avoid data loss.
                 pass
 
         sequence = self._async_vlm_next_sequence
@@ -785,6 +810,10 @@ class VisualMonitorPipeline:
             if result.used_fallback:
                 self.metrics.vision_fallback_total.inc()
             if result.vlm_meta:
+                if not bool(result.vlm_meta.get("parse_ok", False)) or bool(result.vlm_meta.get("error")):
+                    self._debug_state["last_capture_result"] = "captured_vlm_failed"
+                else:
+                    self._debug_state["last_capture_result"] = "captured_changed"
                 result.frame.metadata["vlm"] = result.vlm_meta
                 vlm_title = str(result.vlm_meta.get("conversation_title", "")).strip()
                 if vlm_title:
@@ -1050,10 +1079,10 @@ class VisualMonitorPipeline:
     def _normalize_app_name(raw: str | None) -> str:
         value = (raw or "").strip()
         if not value:
-            return "微信"
+            return "\u5fae\u4fe1"
         lower = value.lower()
-        if "wechat" in lower or "微信" in value:
-            return "微信"
+        if "wechat" in lower or "\u5fae\u4fe1" in value:
+            return "\u5fae\u4fe1"
         return value
 
     def _build_session_key(self, app_name: str, conversation_title: str | None) -> str | None:
@@ -1381,32 +1410,48 @@ class VisualMonitorPipeline:
             return 0.0
 
     @staticmethod
-    def _app_matches(frontmost_app: str | None, target_app: str) -> bool:
+    def _canonical_app_name(value: str | None) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized.endswith(".exe"):
+            return normalized[:-4]
+        return normalized
+
+    @classmethod
+    def _collect_app_aliases(cls, target_app: str, app_aliases: list[str] | None = None) -> set[str]:
+        aliases = {cls._canonical_app_name(target_app)}
+        for alias in app_aliases or []:
+            normalized = cls._canonical_app_name(alias)
+            if normalized:
+                aliases.add(normalized)
+        if aliases & set(cls._DEFAULT_WECHAT_APP_ALIASES):
+            aliases.update(cls._DEFAULT_WECHAT_APP_ALIASES)
+        aliases.discard("")
+        return aliases
+
+    @staticmethod
+    def _matches_alias(frontmost_app: str, alias: str) -> bool:
+        if frontmost_app == alias:
+            return True
+        return (
+            frontmost_app.startswith(f"{alias} ")
+            or frontmost_app.startswith(f"{alias}-")
+            or frontmost_app.startswith(f"{alias}_")
+        )
+
+    @classmethod
+    def _app_matches(cls, frontmost_app: str | None, target_app: str, app_aliases: list[str] | None = None) -> bool:
         if not target_app:
             return True
         if not frontmost_app:
             return False
-        target = target_app.strip().lower()
-        front = frontmost_app.strip().lower()
-        # WeChat app name can appear as "WeChat" or "微信" depending on locale/system.
-        if target in {"wechat", "微信"}:
-            if front in {"wechat", "微信"}:
-                return True
-            return (
-                front.startswith("wechat ")
-                or front.startswith("wechat-")
-                or front.startswith("wechat_")
-                or front.startswith("微信")
-            )
-        if front == target:
-            return True
-        if target in front:
-            return True
-        return False
+        normalized_front = cls._canonical_app_name(frontmost_app)
+        aliases = cls._collect_app_aliases(target_app=target_app, app_aliases=app_aliases)
+        return any(cls._matches_alias(normalized_front, alias) for alias in aliases)
 
     async def _confirm_frontmost_app(
         self,
         target_app_name: str,
+        target_app_aliases: list[str] | None,
         samples: int,
         interval_s: float,
     ) -> tuple[bool, str | None]:
@@ -1417,7 +1462,7 @@ class VisualMonitorPipeline:
         last_name: str | None = None
         for idx in range(checks):
             last_name = await asyncio.to_thread(self.window_probe.frontmost_app_name)
-            if not self._app_matches(last_name, target_app_name):
+            if not self._app_matches(last_name, target_app_name, target_app_aliases):
                 return False, last_name
             if idx < checks - 1 and sleep_s > 0.0:
                 await asyncio.sleep(sleep_s)
@@ -1665,19 +1710,19 @@ class VisualMonitorPipeline:
         if not title:
             return None
         title = self._chat_unread_suffix_pattern.sub("", title).strip()
-        title = re.sub(r"\s+-\s*(微信|wechat)\s*$", "", title, flags=re.IGNORECASE).strip()
+        title = re.sub(r"\s+-\s*(\u5fae\u4fe1|wechat)\s*$", "", title, flags=re.IGNORECASE).strip()
         if not title:
             return None
         lower = title.lower()
         deny_exact = {
-            "微信",
+            "\u5fae\u4fe1",
             "wechat",
-            "聊天信息",
-            "搜索",
-            "更多",
-            "群公告",
-            "返回",
-            "消息",
+            "\u804a\u5929\u4fe1\u606f",
+            "\u641c\u7d22",
+            "\u66f4\u591a",
+            "\u7fa4\u516c\u544a",
+            "\u8fd4\u56de",
+            "\u6d88\u606f",
         }
         if lower in deny_exact or title in deny_exact:
             return None

@@ -73,7 +73,13 @@ async def complete_missing_evidences(
 
     for attempt in range(extraction_attempts):
         try:
+            print(
+                f"🌸🌸🌸 [Profile] evidence completion prompt (attempt {attempt+1}):\n{prompt}"
+            )
             response_text = await llm_provider.generate(prompt, temperature=0.2)
+            print(
+                f"🌸🌸🌸 [Profile] evidence completion response (attempt {attempt+1}):\n{response_text}"
+            )
             parsed_payload = parse_payload(response_text)
             break
         except Exception as exc:  # pylint: disable=broad-except
@@ -123,9 +129,11 @@ async def complete_missing_evidences(
                 + (response_text or "")
             )
             try:
+                print(f"🌸🌸🌸 [Profile] evidence completion repair prompt:\n{repair_prompt}")
                 response_text = await llm_provider.generate(
                     repair_prompt, temperature=0
                 )
+                print(f"🌸🌸🌸 [Profile] evidence completion repair response:\n{response_text}")
                 parsed_payload = parse_payload(response_text)
                 break
             except Exception as repair_exc:  # pylint: disable=broad-except

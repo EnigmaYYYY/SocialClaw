@@ -56,3 +56,17 @@ def test_frontmost_window_title_returns_stripped_title(monkeypatch) -> None:
 
 def test_normalize_app_name_strips_exe_suffix() -> None:
     assert WindowsWindowProbe._normalize_app_name("WeChat.EXE") == "wechat"
+
+
+def test_app_matches_accepts_wechat_alias_process_name(monkeypatch) -> None:
+    probe = _probe()
+    monkeypatch.setattr(probe, "_process_id_for_hwnd", lambda hwnd: 4321)
+    monkeypatch.setattr(probe, "_process_name_from_pid", lambda pid: "WeChatAppEx")
+    assert probe._app_matches(hwnd=100, app_name="WeChat") is True
+
+
+def test_app_matches_rejects_unrelated_process_name(monkeypatch) -> None:
+    probe = _probe()
+    monkeypatch.setattr(probe, "_process_id_for_hwnd", lambda hwnd: 4321)
+    monkeypatch.setattr(probe, "_process_name_from_pid", lambda pid: "Code")
+    assert probe._app_matches(hwnd=100, app_name="WeChat") is False

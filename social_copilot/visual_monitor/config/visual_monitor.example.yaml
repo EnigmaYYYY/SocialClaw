@@ -66,6 +66,7 @@ monitor:
   window_gate:
     enabled: false
     app_name: WeChat
+    app_aliases: [WeChat, 微信, WeChatAppEx, Weixin]
     foreground_settle_seconds: 0.0
     confirmation_samples: 3  # require N consecutive frontmost-app confirmations before capture
     confirmation_interval_ms: 100  # delay between confirmations; use >0 to suppress fast app-switch jitter

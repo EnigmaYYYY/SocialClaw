@@ -14,6 +14,7 @@ export interface ProfileBackfillResult {
   updatedProfiles: number
   failedSessionNames: string[]
   failedReasons: string[]
+  boundaryMode?: 'memcell'
 }
 
 export interface ImportInitializeMemoryProgress {
@@ -36,6 +37,7 @@ export interface ImportInitializeMemoryResult {
   failedSessionNames: string[]
   failedReasons: string[]
   errors: string[]
+  boundaryMode?: 'memcell'
 }
 
 export interface ExecuteImportAndInitializeMemoryOptions {
@@ -91,7 +93,7 @@ export async function executeImportAndInitializeMemory(
   if (importResult.messages.length === 0) {
     return buildFailureResult(importResult.format, importResult, [
       ...baseErrors,
-      '未在导入目录中发现可用聊天消息'
+      '未在导入目录中发现可用聊天消息。'
     ])
   }
 
@@ -112,7 +114,7 @@ export async function executeImportAndInitializeMemory(
   if (events.length === 0) {
     return buildFailureResult(importResult.format, importResult, [
       ...baseErrors,
-      '导入消息无法转换为可写入的聊天记录'
+      '导入消息无法转换为可写入的聊天记录。'
     ])
   }
 
@@ -143,7 +145,8 @@ export async function executeImportAndInitializeMemory(
     updatedProfiles: backfillResult.updatedProfiles,
     failedSessionNames: backfillResult.failedSessionNames,
     failedReasons: backfillResult.failedReasons,
-    errors: [...baseErrors, ...backfillResult.failedReasons]
+    errors: [...baseErrors, ...backfillResult.failedReasons],
+    boundaryMode: backfillResult.boundaryMode
   }
 
   reportProgress(options.onProgress, 'complete', 100, '历史聊天导入与记忆初始化完成')

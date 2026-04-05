@@ -21,7 +21,6 @@ from api_specs.unified_types import (
 from copilot_orchestrator.chat_workflow import ChatProcessRequest, get_chat_workflow_service
 from copilot_orchestrator.orchestrator import get_copilot_orchestrator
 from core.observation.logger import get_logger
-from historical_import_flags import resolve_historical_import_flag
 
 router = APIRouter(prefix="/api/v1/copilot", tags=["copilot"])
 logger = get_logger(__name__)
@@ -294,9 +293,18 @@ def _serialize_foresight(record: Any) -> Dict[str, Any]:
     }
 
 
-def _serialize_memcell(record: Any) -> Dict[str, Any]:
+def _serialize_memcell(
+    record: Any,
+    *,
+    foresight_count_override: Optional[int] = None,
+) -> Dict[str, Any]:
     foresight_memories = list(getattr(record, "foresight_memories", None) or [])
     original_data = list(getattr(record, "original_data", None) or [])
+    legacy_foresight_count = len(foresight_memories)
+    resolved_foresight_count = max(
+        legacy_foresight_count,
+        int(foresight_count_override or 0),
+    )
 
     # Serialize original messages for displaying split conversation
     # Data structure: each item has 'data_type', 'messages' list, and 'meta'
@@ -341,11 +349,82 @@ def _serialize_memcell(record: Any) -> Dict[str, Any]:
         "participants": list(getattr(record, "participants", None) or []),
         "keywords": list(getattr(record, "keywords", None) or []),
         "episode": getattr(record, "episode", None),
-        "foresight_count": len(foresight_memories),
+        "foresight_count": resolved_foresight_count,
         "original_data_count": len(original_data),
         "original_data": serialized_messages,
         "updated_at": _format_datetime(getattr(record, "updated_at", None)),
     }
+
+
+async def _build_memcell_foresight_count_map(
+    owner_user_id: str,
+    conversation_ids: List[str],
+    memcell_records: List[Any],
+    *,
+    base_limit: int,
+) -> Dict[str, int]:
+    """
+    Build a memcell_id -> foresight_count map.
+
+    New foresights are stored in `foresight_records` and linked by:
+    foresight.parent_episode_id -> episode.memcell_event_id_list.
+    """
+    memcell_ids = {
+        str(getattr(record, "id", "") or "").strip()
+        for record in memcell_records
+        if str(getattr(record, "id", "") or "").strip()
+    }
+    if not memcell_ids:
+        return {}
+
+    lookup_limit = max(base_limit * 4, 200)
+    episodic_repo = _get_episodic_repo()
+    foresight_repo = _get_foresight_repo()
+
+    episodes = list(await episodic_repo.get_by_user_id(owner_user_id, limit=lookup_limit))
+    for conversation_id in conversation_ids:
+        episodes.extend(
+            await episodic_repo.get_by_conversation_id(
+                conversation_id,
+                limit=lookup_limit,
+            )
+        )
+    episodes = _dedupe_records(episodes)
+
+    episode_to_memcells: Dict[str, List[str]] = {}
+    for episode in episodes:
+        episode_id = str(getattr(episode, "id", "") or "").strip()
+        memcell_event_ids = [
+            str(memcell_id).strip()
+            for memcell_id in list(getattr(episode, "memcell_event_id_list", None) or [])
+            if str(memcell_id).strip()
+        ]
+        if episode_id and memcell_event_ids:
+            episode_to_memcells[episode_id] = memcell_event_ids
+
+    if not episode_to_memcells:
+        return {}
+
+    foresights = list(await foresight_repo.get_by_user_id(owner_user_id, limit=lookup_limit))
+    for conversation_id in conversation_ids:
+        foresights.extend(
+            await foresight_repo.get_by_conversation_id(
+                conversation_id,
+                limit=lookup_limit,
+            )
+        )
+    foresights = _dedupe_records(foresights)
+
+    count_map: Dict[str, int] = {}
+    for foresight in foresights:
+        parent_episode_id = str(getattr(foresight, "parent_episode_id", "") or "").strip()
+        if not parent_episode_id:
+            continue
+        for memcell_id in episode_to_memcells.get(parent_episode_id, []):
+            if memcell_id in memcell_ids:
+                count_map[memcell_id] = count_map.get(memcell_id, 0) + 1
+
+    return count_map
 
 
 def _normalize_profile_payload(payload: Dict[str, Any]) -> UnifiedProfile:
@@ -536,12 +615,31 @@ async def list_memcells(
 ) -> Dict[str, Any]:
     try:
         repo = _get_memcell_repo()
+        conversation_ids = await _get_owner_conversation_ids(owner_user_id)
         records = list(await repo.find_by_user_id(owner_user_id, limit=max(limit, 1)))
-        for conversation_id in await _get_owner_conversation_ids(owner_user_id):
+        for conversation_id in conversation_ids:
             records.extend(await repo.find_by_group_id(conversation_id, limit=max(limit, 1)))
         records = _sort_records_by_timestamp(_dedupe_records(records))[: max(limit, 1)]
+        foresight_count_map = await _build_memcell_foresight_count_map(
+            owner_user_id,
+            conversation_ids,
+            records,
+            base_limit=max(limit, 1),
+        )
 
-        return {"success": True, "data": [_serialize_memcell(record) for record in records]}
+        return {
+            "success": True,
+            "data": [
+                _serialize_memcell(
+                    record,
+                    foresight_count_override=foresight_count_map.get(
+                        str(getattr(record, "id", "") or "").strip(),
+                        0,
+                    ),
+                )
+                for record in records
+            ],
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -687,6 +785,18 @@ async def process_chat(request: Dict[str, Any]) -> Dict[str, Any]:
                 display_name=display_name,
             )
 
+        force_memory_backfill = bool(request.get("force_memory_backfill", False))
+        allow_memory_replay = bool(request.get("allow_memory_replay", False))
+        is_historical_import = bool(request.get("is_historical_import", False))
+        logger.info(
+            "[process-chat] flags: session_key=%s force_memory_backfill=%s allow_memory_replay=%s is_historical_import=%s message_count=%s",
+            session_key,
+            force_memory_backfill,
+            allow_memory_replay,
+            is_historical_import,
+            len(messages),
+        )
+
         chat_request = ChatProcessRequest(
             owner_user_id=owner_user_id,
             session_key=session_key,
@@ -695,8 +805,9 @@ async def process_chat(request: Dict[str, Any]) -> Dict[str, Any]:
             incoming_message=incoming_msg,
             manual_intent=request.get("manual_intent"),
             force_profile_update=request.get("force_profile_update", False),
-            force_memory_backfill=request.get("force_memory_backfill", False),
-            is_historical_import=resolve_historical_import_flag(request),
+            force_memory_backfill=force_memory_backfill,
+            allow_memory_replay=allow_memory_replay,
+            is_historical_import=is_historical_import,
         )
 
         workflow_service = get_chat_workflow_service()
@@ -1516,6 +1627,7 @@ async def import_chat_history(request: Dict[str, Any]) -> Dict[str, Any]:
                 manual_intent=None,
                 force_profile_update=(i == 0),      # 只在第一批更新画像
                 force_memory_backfill=True,         # 强制回填历史消息
+                allow_memory_replay=(i == 0),       # 仅首批允许重放并清理缓存
             )
 
             # 执行处理
@@ -1630,6 +1742,7 @@ async def import_chat_history_stream(request: Dict[str, Any]) -> StreamingRespon
                     manual_intent=None,
                     force_profile_update=is_first_batch,
                     force_memory_backfill=is_first_batch,
+                    allow_memory_replay=is_first_batch,
                     is_historical_import=True,  # All batches use historical import mode
                 )
 

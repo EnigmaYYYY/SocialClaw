@@ -511,9 +511,9 @@ class ProfileMemoryExtractor(MemoryExtractor):
                     logger.info(
                         f"Starting {attempt+1} time {part_label} profile extraction"
                     )
-                    print(f"🍃🍃🍃 [Profile] {part_label} prompt (attempt {attempt+1}):\n{prompt}")
+                    print(f"🌸🌸🌸 [Profile] {part_label} prompt (attempt {attempt+1}):\n{prompt}")
                     response = await self.llm_provider.generate(prompt, temperature=0.3)
-                    print(f"🍃🍃🍃 [Profile] {part_label} response (attempt {attempt+1}):\n{response}")
+                    print(f"🌸🌸🌸 [Profile] {part_label} response (attempt {attempt+1}):\n{response}")
                     dump_profile_llm_artifacts(
                         f"profile_{part_label.replace(' ', '_')}",
                         prompt=prompt,
@@ -587,11 +587,11 @@ class ProfileMemoryExtractor(MemoryExtractor):
                             part_label,
                             len(repair_input),
                         )
-                        print(f"🍃🍃🍃 [Profile] {part_label} repair prompt:\n{repair_prompt}")
+                        print(f"🌸🌸🌸 [Profile] {part_label} repair prompt:\n{repair_prompt}")
                         response = await self.llm_provider.generate(
                             repair_prompt, temperature=0
                         )
-                        print(f"🍃🍃🍃 [Profile] {part_label} repair response:\n{response}")
+                        print(f"🌸🌸🌸 [Profile] {part_label} repair response:\n{response}")
                         dump_profile_llm_artifacts(
                             f"profile_{part_label.replace(' ', '_')}_repair",
                             prompt=repair_prompt,
@@ -1238,11 +1238,11 @@ class ProfileMemoryExtractor(MemoryExtractor):
                 print(
                     f"[ProfileExtractor] Calling LLM to extract Profile for {user_info['user_name']}..."
                 )
-                print(f"🍃🍃🍃 [Profile] companion profile prompt for {user_info['user_name']}:\n{prompt}")
+                print(f"🌸🌸🌸 [Profile] companion profile prompt for {user_info['user_name']}:\n{prompt}")
                 response_text = await self.llm_provider.generate(
                     prompt, temperature=0.3
                 )
-                print(f"🍃🍃🍃 [Profile] companion profile response for {user_info['user_name']}:\n{response_text[:2000]}..." if response_text and len(response_text) > 2000 else f"🍃🍃🍃 [Profile] companion profile response for {user_info['user_name']}:\n{response_text}")
+                print(f"🌸🌸🌸 [Profile] companion profile response for {user_info['user_name']}:\n{response_text}")
                 dump_profile_llm_artifacts(
                     "profile_part3",
                     prompt=prompt,

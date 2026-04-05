@@ -263,6 +263,39 @@ describe('RealtimeSuggestionAdapter stop behavior', () => {
 
     await adapter.stop()
   })
+
+  it('still posts monitor stop when settings were not preloaded', async () => {
+    let debugCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/monitor/stop')) {
+        expect(init?.method).toBe('POST')
+        return jsonResponse({ running: false })
+      }
+      if (url.includes('/events/poll')) {
+        return jsonResponse({ count: 0, events: [] })
+      }
+      if (url.endsWith('/monitor/debug')) {
+        debugCalls += 1
+        return jsonResponse({
+          running: false,
+          pipeline: { last_frontmost_app: 'WeChat', per_session_inflight: {} }
+        })
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const adapter = new RealtimeSuggestionAdapter()
+    await adapter.stopMonitoring()
+
+    expect(window.electronAPI.settings.load).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18777/monitor/stop',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(debugCalls).toBeGreaterThanOrEqual(1)
+  })
 })
 
 describe('RealtimeSuggestionAdapter suggestion flow', () => {

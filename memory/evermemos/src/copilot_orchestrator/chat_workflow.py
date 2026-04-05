@@ -80,6 +80,7 @@ class ChatProcessRequest:
     manual_intent: Optional[str] = None  # 手动意图
     force_profile_update: bool = False  # 是否强制更新画像
     force_memory_backfill: bool = False  # 是否回放未处理的历史聊天
+    allow_memory_replay: bool = False  # 是否允许清空会话缓存并重放（高风险，默认关闭）
     is_historical_import: bool = False  # 是否为历史导入模式（绕过pending_boundary）
     visual_context: Optional[str] = None  # VLM 场景描述文本（来自视觉检测）
 
@@ -554,11 +555,16 @@ class ChatWorkflowService:
             return conversation_id, candidate_messages, False
 
         should_force_replay = False
-        if request.force_memory_backfill:
+        if request.force_memory_backfill and request.allow_memory_replay:
             current_memcell_count = await self._get_session_memcell_count(request.session_key)
             should_force_replay = (current_memcell_count or 0) <= 0
             if should_force_replay:
                 return conversation_id, candidate_messages, True
+        elif request.force_memory_backfill and not request.allow_memory_replay:
+            logger.warning(
+                "force_memory_backfill ignored because allow_memory_replay is false: session=%s",
+                request.session_key,
+            )
 
         if not conversation_repo:
             return conversation_id, candidate_messages, False
@@ -693,7 +699,7 @@ class ChatWorkflowService:
                 "memorize_request",
                 owner_user_id=request.owner_user_id,
                 conversation_id=conversation_id,
-                skip_pending_boundary=request.force_memory_backfill,
+                skip_pending_boundary=request.is_historical_import,
                 message_count=len(new_messages),
             )
             await memory_manager.memorize(memorize_request)

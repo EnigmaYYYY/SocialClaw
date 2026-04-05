@@ -77,6 +77,7 @@ def test_monitor_config_can_be_read_and_updated() -> None:
     payload = baseline.json()
     assert payload["monitor"]["vision"]["mode"] == "vlm_structured"
     assert payload["monitor"]["window_gate"]["app_name"] == "WeChat"
+    assert payload["monitor"]["window_gate"]["app_aliases"] == ["WeChat", "微信", "WeChatAppEx", "Weixin"]
 
     updated = client.put(
         "/monitor/config",

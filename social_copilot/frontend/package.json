@@ -4,7 +4,7 @@
   "description": "AI 社交军师 - Local LLM powered chat analysis and reply suggestions",
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev-electron.cjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx",

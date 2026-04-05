@@ -21,6 +21,8 @@ const CHAT_RECORD_CAPTURE_DEDUP_WINDOW_DEFAULT_MS = 120000
 const ASSISTANT_TIMEOUT_MIN_MS = 1000
 const ASSISTANT_TIMEOUT_MAX_MS = 120000
 const ASSISTANT_TIMEOUT_DEFAULT_MS = 30000
+const CLEANUP_RETENTION_HOURS_MIN = 1
+const CLEANUP_RETENTION_HOURS_DEFAULT = 24
 
 export function captureSensitivityToScheme(
   value: AppSettings['visualMonitor']['captureSensitivity']
@@ -75,6 +77,30 @@ export function assistantTimeoutSecondsToMs(value: number): number {
   )
 }
 
+export function normalizeCleanupRetentionHours(value: number | string): number {
+  const parsed = typeof value === 'number'
+    ? value
+    : Number.parseInt(value.trim(), 10)
+  if (!Number.isFinite(parsed)) {
+    return CLEANUP_RETENTION_HOURS_DEFAULT
+  }
+  return Math.max(CLEANUP_RETENTION_HOURS_MIN, Math.floor(parsed))
+}
+
+type CleanupLocalDataResult = Awaited<ReturnType<typeof window.electronAPI.maintenance.cleanupLocalData>>
+
+export function formatCleanupResultMessage(result: CleanupLocalDataResult): string {
+  const cutoffLabel = new Date(result.cutoffIso).toLocaleString()
+  const baseMessage =
+    `清理完成（${cutoffLabel} 之前）：聊天记录删除 ${result.chat.deletedMessages} 条消息、${result.chat.deletedFiles} 个会话文件；` +
+    `缓存删除 ${result.cache.deletedFiles} 个文件、${result.cache.deletedDirs} 个目录。`
+  const errorCount = result.chat.errors + result.cache.errors
+  if (errorCount > 0) {
+    return `${baseMessage} 另有 ${errorCount} 项清理失败，请查看日志。`
+  }
+  return baseMessage
+}
+
 export function MainConsoleApp(): JSX.Element {
   const folders = useMemo(() => getMemoryFolderItems(), [])
   const [selectedFolderId, setSelectedFolderId] = useState(folders[0]?.id ?? 'inbox')
@@ -95,6 +121,8 @@ export function MainConsoleApp(): JSX.Element {
   })
   const [providerConnectionTesting, setProviderConnectionTesting] = useState<Partial<Record<ProviderConnectionKey, boolean>>>({})
   const [providerFeedback, setProviderFeedback] = useState<Partial<Record<ProviderFeedbackKey, ProviderFeedbackState>>>({})
+  const [cleanupHoursInput, setCleanupHoursInput] = useState(String(CLEANUP_RETENTION_HOURS_DEFAULT))
+  const [isCleaningLocalData, setIsCleaningLocalData] = useState(false)
 
   // New account modal state
   const [showNewAccountModal, setShowNewAccountModal] = useState(false)
@@ -559,6 +587,35 @@ export function MainConsoleApp(): JSX.Element {
     await loadMemoryOverview()
     setMemoryRefreshToken((current) => current + 1)
   }, [loadMemoryOverview, pushStatus])
+
+  const cleanupRetentionHours = normalizeCleanupRetentionHours(cleanupHoursInput)
+
+  const handleCleanupLocalData = useCallback(async (): Promise<void> => {
+    if (!settings) return
+
+    const olderThanHours = normalizeCleanupRetentionHours(cleanupHoursInput)
+    const cutoffDate = new Date(Date.now() - olderThanHours * 60 * 60 * 1000)
+    const confirmed = window.confirm(
+      `将清理 ${cutoffDate.toLocaleString()} 之前的聊天记录与缓存（仅当前账号）。\n\n此操作不可撤销，是否继续？`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setCleanupHoursInput(String(olderThanHours))
+    setIsCleaningLocalData(true)
+    try {
+      const result = await window.electronAPI.maintenance.cleanupLocalData({ olderThanHours })
+      await refreshMemoryLibrary()
+      const hasErrors = result.chat.errors > 0 || result.cache.errors > 0
+      pushStatus(formatCleanupResultMessage(result), hasErrors ? 'error' : 'success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '清理失败'
+      pushStatus(`清理失败: ${message}`, 'error')
+    } finally {
+      setIsCleaningLocalData(false)
+    }
+  }, [settings, cleanupHoursInput, refreshMemoryLibrary, pushStatus])
 
   const saveSettings = async (): Promise<void> => {
     if (!settings) return
@@ -1465,6 +1522,30 @@ export function MainConsoleApp(): JSX.Element {
                   }
                 />
               </div>
+              <div className="settings-row">
+                <label htmlFor="cleanup-retention-hours">保留最近小时数</label>
+                <input
+                  id="cleanup-retention-hours"
+                  type="number"
+                  min={CLEANUP_RETENTION_HOURS_MIN}
+                  step={1}
+                  value={cleanupHoursInput}
+                  onChange={(event) => setCleanupHoursInput(event.target.value)}
+                />
+              </div>
+              <div className="settings-actions-inline">
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => void handleCleanupLocalData()}
+                  disabled={isCleaningLocalData}
+                >
+                  {isCleaningLocalData ? '清理中...' : `清理 ${cleanupRetentionHours} 小时前聊天记录与缓存`}
+                </button>
+              </div>
+              <p className="settings-tip">
+                默认清理 24 小时前数据。仅清理当前账号聊天记录与本地缓存目录，不会删除 memory library 与远端 EverMemOS 数据。
+              </p>
             </section>
 
             <section className="console-card settings-save-row">

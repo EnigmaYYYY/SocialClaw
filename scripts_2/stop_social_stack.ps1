@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RootDir = "",
   [switch]$SkipDocker
 )

@@ -97,8 +97,8 @@ export interface ContactProfile {
 }
 
 /**
- * ProfileField - 画像字段统一格式
- * LLM 返回格式与存储格式一致：{"value": "字段值", "evidences": ["conversation_id"]}
+ * ProfileField - 鐢诲儚瀛楁缁熶竴鏍煎紡
+ * LLM 杩斿洖鏍煎紡涓庡瓨鍌ㄦ牸寮忎竴鑷达細{"value": "瀛楁鍊?, "evidences": ["conversation_id"]}
  */
 export interface ProfileField {
   value: string
@@ -113,10 +113,10 @@ export interface UnifiedProfile {
   conversation_id?: string | null
   display_name: string
   aliases: string[]
-  // 单值字段
+  // 鍗曞€煎瓧娈?
   occupation?: ProfileField | null
   relationship?: ProfileField | null
-  // 列表字段（全部带证据）
+  // 鍒楄〃瀛楁锛堝叏閮ㄥ甫璇佹嵁锛?
   traits: ProfileField[]
   interests: ProfileField[]
   way_of_decision_making: ProfileField[]
@@ -129,7 +129,7 @@ export interface UnifiedProfile {
   fear_system: ProfileField[]
   value_system: ProfileField[]
   humor_use: ProfileField[]
-  // 社交属性
+  // 绀句氦灞炴€?
   social_attributes: {
     role: string
     age_group?: string | null
@@ -141,7 +141,7 @@ export interface UnifiedProfile {
       context?: string | null
     }
   }
-  // 风险评估
+  // 椋庨櫓璇勪及
   risk_assessment?: {
     is_suspicious: boolean
     risk_level: 'low' | 'medium' | 'high'
@@ -149,7 +149,7 @@ export interface UnifiedProfile {
     risk_patterns: string[]
     last_checked?: string | null
   } | null
-  // 元数据
+  // 鍏冩暟鎹?
   metadata: {
     version: number
     created_at: string
@@ -158,7 +158,7 @@ export interface UnifiedProfile {
     last_cluster_id?: string | null
     update_count: number
   }
-  // 向量检索
+  // 鍚戦噺妫€绱?
   retrieval?: {
     vector?: number[] | null
     vector_model?: string | null
@@ -305,6 +305,7 @@ export interface ImportInitializeMemoryResult {
   failedSessionNames: string[]
   failedReasons: string[]
   errors: string[]
+  boundaryMode?: 'memcell'
 }
 
 /**
@@ -737,6 +738,31 @@ export interface ProfileAdminAPI {
   markSessionDirty: (sessionKey: string) => Promise<void>
 }
 
+export interface CleanupLocalDataInput {
+  olderThanHours: number
+}
+
+export interface CleanupLocalDataResult {
+  cutoffIso: string
+  chat: {
+    scannedSessions: number
+    deletedMessages: number
+    deletedFiles: number
+    errors: number
+  }
+  cache: {
+    scannedFiles: number
+    deletedFiles: number
+    deletedDirs: number
+    errors: number
+    skippedActiveRunDir: boolean
+  }
+}
+
+export interface MaintenanceAPI {
+  cleanupLocalData: (input: CleanupLocalDataInput) => Promise<CleanupLocalDataResult>
+}
+
 export interface ClearProfilesResult {
   success: boolean
   cleared_profiles: number
@@ -750,6 +776,7 @@ export interface ProfileBackfillResult {
   updatedProfiles: number
   failedSessionNames: string[]
   failedReasons: string[]
+  boundaryMode?: 'memcell'
 }
 
 export interface BackfillSessionSummary {
@@ -892,6 +919,7 @@ export interface ElectronAPI {
   chatRecords: ChatRecordsAPI
   memoryFiles: MemoryFilesAPI
   profileAdmin: ProfileAdminAPI
+  maintenance: MaintenanceAPI
 
   /**
    * Lists all contact IDs
@@ -1249,6 +1277,11 @@ const profileAdminAPI: ProfileAdminAPI = {
     ipcRenderer.invoke('profileAdmin:markSessionDirty', sessionKey)
 }
 
+const maintenanceAPI: MaintenanceAPI = {
+  cleanupLocalData: (input: CleanupLocalDataInput): Promise<CleanupLocalDataResult> =>
+    ipcRenderer.invoke('maintenance:cleanupLocalData', input)
+}
+
 /**
  * Electron API implementation using IPC invoke
  * All methods are type-safe and correspond to main process handlers
@@ -1271,6 +1304,7 @@ const electronAPI: ElectronAPI = {
   chatRecords: chatRecordsAPI,
   memoryFiles: memoryFilesAPI,
   profileAdmin: profileAdminAPI,
+  maintenance: maintenanceAPI,
 
   // Direct methods
   listContacts: (): Promise<string[]> =>
@@ -1319,3 +1353,5 @@ declare global {
     electronAPI: ElectronAPI
   }
 }
+
+

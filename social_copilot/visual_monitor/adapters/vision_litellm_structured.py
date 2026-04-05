@@ -115,6 +115,10 @@ class LiteLLMStructuredVisionAdapter:
     def __init__(self, config: LiteLLMStructuredVisionConfig) -> None:
         self._config = config
 
+    @staticmethod
+    def _rabbit_log(message: str) -> None:
+        print(f"🐰🐰🐰 {message}", flush=True)
+
     def extract_structured(
         self,
         image_png: bytes,
@@ -221,6 +225,11 @@ class LiteLLMStructuredVisionAdapter:
         attempt_count = 0
         for attempt in range(1, DEFAULT_TIMEOUT_RETRY_ATTEMPTS + 1):
             attempt_count = attempt
+            self._rabbit_log(
+                "VLM request send "
+                f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, "
+                f"model={self._config.model}, image_count={len(images_png)})"
+            )
             try:
                 with httpx.Client(timeout=self._config.timeout_ms / 1000.0, trust_env=False) as client:
                     response = client.post(
@@ -236,10 +245,18 @@ class LiteLLMStructuredVisionAdapter:
                     raw = response.text
                     response.raise_for_status()
                     headers = {key.lower(): value for key, value in response.headers.items()}
+                self._rabbit_log(
+                    "VLM response received "
+                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, status={response.status_code})"
+                )
                 break
             except httpx.HTTPStatusError as exc:
                 error_text = f"HTTPStatusError:{exc.response.status_code}:{_compact_error_body(exc.response.text)}"
                 attempt_errors.append(error_text)
+                self._rabbit_log(
+                    "VLM response received with HTTPStatusError "
+                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, error={error_text})"
+                )
                 result = LiteLLMStructuredVisionResult(
                     messages=[],
                     conversation_title=None,
@@ -262,6 +279,10 @@ class LiteLLMStructuredVisionAdapter:
             except httpx.HTTPError as exc:
                 error_text = f"HTTPError:{exc}"
                 attempt_errors.append(error_text)
+                self._rabbit_log(
+                    "VLM response received with HTTPError "
+                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, error={error_text})"
+                )
                 if attempt >= DEFAULT_TIMEOUT_RETRY_ATTEMPTS or not _is_timeout_error(exc):
                     result = LiteLLMStructuredVisionResult(
                         messages=[],
@@ -285,6 +306,10 @@ class LiteLLMStructuredVisionAdapter:
             except Exception as exc:  # pragma: no cover
                 error_text = str(exc)
                 attempt_errors.append(error_text)
+                self._rabbit_log(
+                    "VLM response received with Exception "
+                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, error={error_text})"
+                )
                 if attempt >= DEFAULT_TIMEOUT_RETRY_ATTEMPTS or not _is_timeout_error(exc):
                     result = LiteLLMStructuredVisionResult(
                         messages=[],
@@ -312,6 +337,11 @@ class LiteLLMStructuredVisionAdapter:
         raw_content = _extract_content_from_chat_completion(raw)
         payload = parse_vlm_structured_payload(raw_content)
         messages, parse_ok, conversation_title = parse_vlm_structured_content(raw_content)
+        self._rabbit_log(
+            "VLM structured parse complete "
+            f"(attempt={attempt_count}, parse_ok={parse_ok}, message_count={len(messages)}, "
+            f"roundtrip_ms={round(roundtrip_ms, 2)})"
+        )
         result = LiteLLMStructuredVisionResult(
             messages=messages,
             conversation_title=conversation_title,

@@ -17,6 +17,7 @@ class WindowBounds:
 
 class WindowsWindowProbe:
     """Uses Win32 APIs to query foreground app/window on Windows."""
+    _DEFAULT_WECHAT_ALIASES = ("wechat", "weixin", "wechatappex", "\u5fae\u4fe1")
 
     def __init__(self, user32: object | None = None, configure_user32: bool = True) -> None:
         self._user32 = user32 or self._load_user32()
@@ -68,6 +69,24 @@ class WindowsWindowProbe:
             return base[:-4]
         return base
 
+    @classmethod
+    def _expand_aliases(cls, app_name: str) -> set[str]:
+        normalized = cls._normalize_app_name(app_name)
+        aliases = {normalized}
+        if normalized in cls._DEFAULT_WECHAT_ALIASES:
+            aliases.update(cls._DEFAULT_WECHAT_ALIASES)
+        return aliases
+
+    @staticmethod
+    def _matches_alias(front_name: str, alias: str) -> bool:
+        if front_name == alias:
+            return True
+        return (
+            front_name.startswith(f"{alias} ")
+            or front_name.startswith(f"{alias}-")
+            or front_name.startswith(f"{alias}_")
+        )
+
     def _app_matches(self, hwnd: int, app_name: str) -> bool:
         if not app_name.strip():
             return True
@@ -77,7 +96,9 @@ class WindowsWindowProbe:
         front_name = self._process_name_from_pid(pid)
         if not front_name:
             return False
-        return self._normalize_app_name(front_name) == self._normalize_app_name(app_name)
+        normalized_front = self._normalize_app_name(front_name)
+        aliases = self._expand_aliases(app_name)
+        return any(self._matches_alias(normalized_front, alias) for alias in aliases)
 
     def _foreground_hwnd(self) -> int:
         try:

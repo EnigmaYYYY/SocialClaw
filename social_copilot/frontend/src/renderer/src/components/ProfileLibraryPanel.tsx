@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,8 +20,26 @@ import { resolveImportPathFromFiles } from './memory-import-upload'
 interface ProfileField {
   value: string
   evidence_level?: string  // L1 显式 / L2 强隐含
-  evidences: string[]
+  evidences: Array<string | { event_id?: string; reasoning?: string }>
 }
+
+type EvidenceLevel = 'L1' | 'L2' | 'L3'
+type ListFieldKey =
+  | 'occupation'
+  | 'relationship'
+  | 'traits'
+  | 'personality'
+  | 'interests'
+  | 'way_of_decision_making'
+  | 'life_habit_preference'
+  | 'communication_style'
+  | 'catchphrase'
+  | 'user_to_friend_catchphrase'
+  | 'user_to_friend_chat_style'
+  | 'motivation_system'
+  | 'fear_system'
+  | 'value_system'
+  | 'humor_use'
 
 type EpisodicMemoryItem = Awaited<
   ReturnType<typeof window.electronAPI.profileAdmin.listEpisodes>
@@ -89,6 +108,33 @@ function formatTime(value?: string | null): string {
   const hour = `${date.getHours()}`.padStart(2, '0')
   const minute = `${date.getMinutes()}`.padStart(2, '0')
   return `${month}/${day} ${hour}:${minute}`
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getForesightStatus(item: {
+  start_time?: string | null
+  end_time?: string | null
+}): 'expired' | 'upcoming' | 'active' {
+  const now = new Date()
+  const end = item.end_time ? new Date(item.end_time) : null
+  const start = item.start_time ? new Date(item.start_time) : null
+  if (end && now > end) return 'expired'
+  if (start && now < start) return 'upcoming'
+  return 'active'
+}
+
+function truncateParticipantId(id: string): string {
+  if (id.startsWith('contact_')) return id.slice(0, 14)
+  return id
 }
 
 function splitList(value: string): string[] {
@@ -224,6 +270,283 @@ function parseFieldsWithLevel(value: string, defaultLevel: string = 'L2'): Profi
     })
 }
 
+function toReadableFieldLabel(fieldKey: ListFieldKey): string {
+  const labelMap: Record<ListFieldKey, string> = {
+    occupation: '职业',
+    relationship: '关系',
+    traits: '性格特征',
+    personality: '人格描述',
+    interests: '兴趣偏好',
+    way_of_decision_making: '决策方式',
+    life_habit_preference: '生活偏好',
+    communication_style: '沟通风格',
+    catchphrase: '口头禅',
+    user_to_friend_catchphrase: '对好友称呼',
+    user_to_friend_chat_style: '对好友沟通风格',
+    motivation_system: '动机系统',
+    fear_system: '恐惧系统',
+    value_system: '价值观',
+    humor_use: '幽默风格'
+  }
+  return labelMap[fieldKey]
+}
+
+function normalizeProfileFieldList(fields: unknown): ProfileField[] {
+  if (!Array.isArray(fields)) return []
+  return fields
+    .map((item) => {
+      if (typeof item === 'string') {
+        const value = item.trim()
+        if (!value) return null
+        return { value, evidence_level: 'L2', evidences: [] } as ProfileField
+      }
+      if (!item || typeof item !== 'object' || !('value' in item)) return null
+      const rawValue = (item as { value?: unknown }).value
+      const value = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue ?? '').trim()
+      if (!value) return null
+      const rawLevel = (item as { evidence_level?: unknown }).evidence_level
+      const level: EvidenceLevel = rawLevel === 'L1' || rawLevel === 'L2' || rawLevel === 'L3' ? rawLevel : 'L2'
+      const evidencesRaw = (item as { evidences?: unknown }).evidences
+      const evidences = Array.isArray(evidencesRaw) ? evidencesRaw : []
+      return { value, evidence_level: level, evidences } as ProfileField
+    })
+    .filter((item): item is ProfileField => Boolean(item))
+}
+
+function normalizeEvidenceEntries(
+  evidences: Array<string | { event_id?: string; reasoning?: string }>
+): Array<{ event_id: string; reasoning: string }> {
+  return evidences
+    .map((item) => {
+      if (typeof item === 'string') {
+        const eventId = item.trim()
+        return eventId ? { event_id: eventId, reasoning: '' } : null
+      }
+      if (!item || typeof item !== 'object') return null
+      const eventId = typeof item.event_id === 'string' ? item.event_id.trim() : ''
+      const reasoning = typeof item.reasoning === 'string' ? item.reasoning.trim() : ''
+      return eventId ? { event_id: eventId, reasoning } : null
+    })
+    .filter((item): item is { event_id: string; reasoning: string } => Boolean(item))
+}
+
+function levelClass(level?: string): string {
+  if (level === 'L1') return 'level-l1'
+  if (level === 'L3') return 'level-l3'
+  return 'level-l2'
+}
+
+export function shouldShowEvidenceForField(fieldKey: ListFieldKey): boolean {
+  return fieldKey !== 'catchphrase'
+}
+
+export function buildRawJsonPreview(profile: UnifiedProfile): Record<string, unknown> {
+  const preview = deepClone(profile) as Record<string, unknown>
+  delete preview.retrieval
+  return preview
+}
+
+function ProfileListFieldCard({
+  fieldKey,
+  value,
+  onChange
+}: {
+  fieldKey: ListFieldKey
+  value: unknown
+  onChange: (next: ProfileField[]) => void
+}): JSX.Element {
+  const fields = normalizeProfileFieldList(value)
+  const showEvidence = shouldShowEvidenceForField(fieldKey)
+  const [newValue, setNewValue] = useState('')
+  const [newLevel, setNewLevel] = useState<EvidenceLevel>('L1')
+  const [manualSignatures, setManualSignatures] = useState<string[]>([])
+  const [isEditing, setIsEditing] = useState(false)
+  const cardRef = useRef<HTMLElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const [activeEvidence, setActiveEvidence] = useState<null | {
+    key: string
+    evidences: Array<{ event_id: string; reasoning: string }>
+    left: number
+    top: number
+    anchorTop: number
+    anchorBottom: number
+  }>(null)
+
+  useEffect(() => {
+    setManualSignatures((current) => {
+      const signatures = new Set(fields.map((item) => `${item.value}::`))
+      return current.filter((signature) => signatures.has(signature))
+    })
+  }, [fields])
+
+  useEffect(() => {
+    setActiveEvidence(null)
+  }, [isEditing])
+
+  useLayoutEffect(() => {
+    if (!activeEvidence || !cardRef.current || !popoverRef.current) return
+    const cardRect = cardRef.current.getBoundingClientRect()
+    const popRect = popoverRef.current.getBoundingClientRect()
+    const width = popRect.width
+    const height = popRect.height
+    const maxLeft = Math.max(8, cardRect.width - width - 8)
+    const nextLeft = Math.min(Math.max(activeEvidence.left, 8), maxLeft)
+    const bottomSpace = cardRect.height - activeEvidence.anchorBottom
+    const showTop = bottomSpace < height + 10 && activeEvidence.anchorTop > height + 10
+    const nextTop = showTop
+      ? Math.max(8, activeEvidence.anchorTop - height - 6)
+      : Math.min(activeEvidence.anchorBottom + 6, Math.max(8, cardRect.height - height - 8))
+    if (nextLeft !== activeEvidence.left || nextTop !== activeEvidence.top) {
+      setActiveEvidence((current) => (current ? { ...current, left: nextLeft, top: nextTop } : current))
+    }
+  }, [activeEvidence])
+
+  const addItem = (): void => {
+    const trimmed = newValue.trim()
+    if (!trimmed) return
+    const nextItem: ProfileField = { value: trimmed, evidence_level: newLevel, evidences: [] }
+    onChange([...fields, nextItem])
+    setManualSignatures((current) => [...current, `${trimmed}::`])
+    setNewValue('')
+    setNewLevel('L1')
+  }
+
+  const removeItem = (index: number): void => {
+    const target = fields[index]
+    onChange(fields.filter((_, i) => i !== index))
+    if (!target) return
+    const signature = `${target.value}::`
+    setManualSignatures((current) => current.filter((item) => item !== signature))
+  }
+
+  const handleEvidenceMouseEnter = (
+    event: ReactMouseEvent<HTMLElement>,
+    key: string,
+    evidences: Array<{ event_id: string; reasoning: string }>
+  ): void => {
+    if (!cardRef.current) return
+    const anchorRect = event.currentTarget.getBoundingClientRect()
+    const cardRect = cardRef.current.getBoundingClientRect()
+    const estimatedWidth = 340
+    const maxLeft = Math.max(8, cardRect.width - estimatedWidth - 8)
+    const left = Math.min(Math.max(anchorRect.left - cardRect.left, 8), maxLeft)
+    setActiveEvidence({
+      key,
+      evidences,
+      left,
+      top: anchorRect.bottom - cardRect.top + 6,
+      anchorTop: anchorRect.top - cardRect.top,
+      anchorBottom: anchorRect.bottom - cardRect.top
+    })
+  }
+
+  const handleEvidenceMouseLeave = (event: ReactMouseEvent<HTMLElement>, key: string): void => {
+    const related = event.relatedTarget as HTMLElement | null
+    if (related?.closest(`[data-evidence-key="${key}"]`)) return
+    setActiveEvidence((current) => (current?.key === key ? null : current))
+  }
+
+  return (
+    <section ref={cardRef} className="profile-list-card profile-editor-field-wide">
+      <div className="profile-list-card-head">
+        <span className="profile-list-card-label">{toReadableFieldLabel(fieldKey)}</span>
+        <div className="profile-list-card-head-actions">
+          <span className="profile-list-card-count">{fields.length}</span>
+          <button type="button" className="profile-edit-toggle" onClick={() => setIsEditing((current) => !current)}>
+            {isEditing ? '完成' : '编辑'}
+          </button>
+        </div>
+      </div>
+      <div className="profile-list-items">
+        {fields.length === 0 ? <p className="profile-empty-hint">暂无条目</p> : null}
+        {fields.map((item, index) => {
+          const level = item.evidence_level ?? 'L2'
+          const evidences = normalizeEvidenceEntries(item.evidences ?? [])
+          const signature = `${item.value}::`
+          const isManual = manualSignatures.includes(signature)
+          const evidenceKey = `${fieldKey}-${index}-${signature}`
+          return (
+            <article key={`${item.value}-${index}`} className={`profile-list-item ${levelClass(level)}`}>
+              <div className="profile-list-dot" />
+              <div className="profile-list-content">
+                <div className="profile-list-topline">
+                  <span className="profile-list-value">{item.value}</span>
+                  <div className="profile-list-meta">
+                    <span className={`profile-level-badge ${levelClass(level)}`}>{level}</span>
+                    {showEvidence ? (
+                      <span
+                        className="profile-evidence-anchor"
+                        data-evidence-key={evidenceKey}
+                        onMouseEnter={(event) => handleEvidenceMouseEnter(event, evidenceKey, evidences)}
+                        onMouseLeave={(event) => handleEvidenceMouseLeave(event, evidenceKey)}
+                      >
+                        <span className="profile-evidence-tag">证据 {evidences.length}</span>
+                      </span>
+                    ) : null}
+                    {isManual ? <span className="profile-manual-badge">MANUAL</span> : null}
+                  </div>
+                </div>
+                {isEditing ? (
+                  <div className="profile-list-actions">
+                    <button type="button" className="profile-list-delete" onClick={() => removeItem(index)} aria-label="删除条目">
+                      ×
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          )
+        })}
+      </div>
+      {isEditing ? (
+        <div className="profile-list-addbar">
+          <input
+            value={newValue}
+            placeholder="添加条目..."
+            onChange={(event) => setNewValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                addItem()
+              }
+            }}
+          />
+          <select value={newLevel} onChange={(event) => setNewLevel(event.target.value as EvidenceLevel)}>
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+          </select>
+          <button type="button" className="memory-refresh-btn" onClick={addItem}>
+            添加
+          </button>
+        </div>
+      ) : null}
+      {showEvidence && activeEvidence ? (
+        <div className="profile-evidence-overlay-layer">
+          <div
+            ref={popoverRef}
+            className="profile-evidence-popover profile-evidence-popover-overlay"
+            data-evidence-key={activeEvidence.key}
+            style={{ left: `${activeEvidence.left}px`, top: `${activeEvidence.top}px` }}
+            onMouseLeave={(event) => handleEvidenceMouseLeave(event, activeEvidence.key)}
+          >
+            {activeEvidence.evidences.length === 0 ? (
+              <span className="profile-evidence-empty">暂无证据</span>
+            ) : (
+              activeEvidence.evidences.map((evidence, evidenceIndex) => (
+                <span key={`${evidence.event_id}-${evidenceIndex}`} className="profile-evidence-row">
+                  <span>{evidence.event_id}</span>
+                  {evidence.reasoning ? <span>{evidence.reasoning}</span> : null}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function buildProfileSummary(profile: UnifiedProfile): string {
   const parts = [
     getFieldValue(profile.occupation),
@@ -233,7 +556,7 @@ function buildProfileSummary(profile: UnifiedProfile): string {
   ]
     .map((item) => item?.trim?.() ?? '')
     .filter((item) => item && item !== 'unknown')
-  return parts.length > 0 ? parts.join(' · ') : '暂无摘要'
+  return parts.join(' · ')
 }
 
 function buildCurrentUserSummary(profile: UnifiedProfile | null): string {
@@ -326,7 +649,7 @@ function formatImportResult(result: ImportInitializeMemoryResult | null): string
     return null
   }
   const base = `已导入 ${result.importedMessages} 条消息，写入 ${result.writtenSessions} 个会话，初始化 ${result.initializedSessions} 个会话，更新 ${result.updatedProfiles} 个画像。`
-  const hint = '导入完成后可点击“回填旧聊天”基于 chat_records/微信 重新生成画像。'
+  const hint = '导入完成后可点击"回填旧聊天"基于 chat_records/微信 重新生成画像。'
   if (result.failedInitializationSessions > 0) {
     const failedNames = result.failedSessionNames.slice(0, 3).join('、')
     return `${base} 失败 ${result.failedInitializationSessions} 个${failedNames ? `：${failedNames}` : ''}。${hint}`
@@ -588,7 +911,7 @@ export function ProfileLibraryPanel({
   const handleImportProgress = (progress: ImportInitializeMemoryProgress): void => {
     setImportProgress(progress)
     if (progress.stage === 'backfilling') {
-      setSummaryMessage('正在初始化旧聊天记录，长期记忆列表会自动刷新。完成后可再次点击“回填旧聊天”基于 chat_records/微信 重新生成画像。')
+      setSummaryMessage('正在初始化旧聊天记录，长期记忆列表会自动刷新。完成后可再次点击"回填旧聊天"基于 chat_records/微信 重新生成画像。')
       startLiveRefresh()
       void refreshMemoryView()
       return
@@ -842,7 +1165,7 @@ export function ProfileLibraryPanel({
     if (items.length === 0) {
       return
     }
-    const label = items.length === 1 ? `“${items[0].display_name || '未命名画像'}”` : `${items.length} 条画像`
+    const label = items.length === 1 ? `"${items[0].display_name || '未命名画像'}"` : `${items.length} 条画像`
     if (!window.confirm(`确认删除 ${label} 吗？`)) {
       return
     }
@@ -970,144 +1293,103 @@ export function ProfileLibraryPanel({
 
   return (
     <div className="memory-library-shell">
+      {/* 卡片 1：导入区 */}
       <section className="console-card">
-        <div className="memory-section-head">
-          <div>
+        <div className="memory-upload-header">
+          <strong>导入旧聊天记录</strong>
+          <p>支持 WeChatMsg · wechatDataBackup · SQLite 解密文件</p>
+        </div>
+        <div
+          className={`memory-upload-panel ${dragActive ? 'drag-active' : ''}`}
+          onDragEnter={handleDragOver}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={(event) => void handleDrop(event)}
+        >
+          <div className="memory-upload-copy">
+            <p>拖拽文件或文件夹至此，或点击按钮选择 WeChatMsg、wechatDataBackup 或解密后的 SQLite 文件</p>
+            {importTargetLabel ? <span className="memory-upload-target">已选：{importTargetLabel}</span> : null}
+            {importProgress ? (
+              <span className="memory-upload-status-line">
+                {importProgress.progress}% · {importProgress.message}
+              </span>
+            ) : null}
+          </div>
+          <div className="memory-upload-actions">
+            <button
+              type="button"
+              className="memory-refresh-btn"
+              onClick={() => void openFilePicker()}
+              disabled={importingHistory || backfilling || regenerating || clearing}
+            >
+              选择文件
+            </button>
+            <button
+              type="button"
+              className="memory-refresh-btn"
+              onClick={() => void openFolderPicker()}
+              disabled={importingHistory || backfilling || regenerating || clearing}
+            >
+              选择文件夹
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 卡片 2：长期记忆管理区 */}
+      <section className="console-card">
+        <div className="profile-mgmt-section">
+          {/* 行 1：标题 + 主操作按钮 */}
+          <div className="profile-mgmt-header">
             <h3>长期记忆</h3>
-            <p>这里展示 EverMemOS 中的画像、情节与前瞻信息，可直接查看、检索和管理。</p>
-            <div className="profile-current-user-card">
-              <div className="profile-current-user-row">
-                <strong>{currentUserProfile?.display_name || '未识别用户'}</strong>
-                <span>{ownerDisplayName}</span>
-              </div>
-              <p>{buildCurrentUserSummary(currentUserProfile)}</p>
-              <div className="profile-current-user-counts">
-                <em>画像 {counts.total}</em>
-                <em>自己 {counts.self}</em>
-                <em>好友 {counts.contacts}</em>
-                <em>情节 {counts.episodes}</em>
-                <em>前瞻 {counts.foresights}</em>
-              </div>
-              {summaryMessage ? <p className="profile-backfill-summary">{summaryMessage}</p> : null}
+            <div className="profile-mgmt-header-actions">
+              <button
+                type="button"
+                className="memory-refresh-btn"
+                onClick={() => void Promise.all([loadData(), loadBackfillSessions(), syncBackfillJob()])}
+              >
+                刷新列表
+              </button>
+              <button
+                type="button"
+                className="memory-refresh-btn"
+                onClick={() => void handleBackfill()}
+                disabled={backfilling || importingHistory}
+              >
+                {backfilling ? '回填中...' : '回填旧聊天'}
+              </button>
             </div>
           </div>
-          <div className="memory-section-actions">
-            <div
-              className={`memory-upload-panel ${dragActive ? 'drag-active' : ''}`}
-              onDragEnter={handleDragOver}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={(event) => void handleDrop(event)}
-            >
-              <div className="memory-upload-copy">
-                <strong>导入旧聊天记录</strong>
-                <p>拖拽聊天记录文件或文件夹到这里，或者点击按钮选择 WeChatMsg、wechatDataBackup 或解密后的 SQLite 文件。导入完成后可点击“回填旧聊天”基于 chat_records/微信 重新生成画像。</p>
-                {importTargetLabel ? <span className="memory-upload-target">已选：{importTargetLabel}</span> : null}
-                {importProgress ? (
-                  <span className="memory-upload-status-line">
-                    {importProgress.progress}% · {importProgress.message}
-                  </span>
-                ) : null}
-              </div>
-              <div className="memory-upload-actions">
-                <button
-                  type="button"
-                  className="memory-refresh-btn"
-                  onClick={() => void openFilePicker()}
-                  disabled={importingHistory || backfilling || regenerating || clearing}
-                >
-                  选择文件
-                </button>
-                <button
-                  type="button"
-                  className="memory-refresh-btn"
-                  onClick={() => void openFolderPicker()}
-                  disabled={importingHistory || backfilling || regenerating || clearing}
-                >
-                  选择文件夹
-                </button>
-              </div>
+
+          {/* 行 2：Stat Cards */}
+          <div className="profile-stat-cards">
+            <div className="profile-stat-card">
+              <span>画像</span>
+              <strong>{counts.total}</strong>
             </div>
+            <div className="profile-stat-card stat-blue">
+              <span>好友</span>
+              <strong>{counts.contacts}</strong>
+            </div>
+            <div className="profile-stat-card stat-green">
+              <span>情节</span>
+              <strong>{counts.episodes}</strong>
+            </div>
+            <div className="profile-stat-card stat-amber">
+              <span>前瞻</span>
+              <strong>{counts.foresights}</strong>
+            </div>
+          </div>
+
+          {/* 行 3：搜索 + 批量选择 */}
+          <div className="profile-mgmt-search-row">
             <label className="memory-search-field">
-              <span>搜索长期记忆</span>
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="搜索好友、画像、情节、前瞻"
+                placeholder="搜索好友、画像、情节、前瞻..."
               />
             </label>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => void Promise.all([loadData(), loadBackfillSessions(), syncBackfillJob()])}
-            >
-              刷新列表
-            </button>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => void handleBackfill()}
-              disabled={backfilling || importingHistory}
-            >
-              {backfilling ? '回填中...' : '回填旧聊天'}
-            </button>
-            <button
-              type="button"
-              className={`memory-refresh-btn ${showBackfillPicker ? 'active' : ''}`}
-              onClick={() => setShowBackfillPicker((current) => !current)}
-              disabled={importingHistory}
-            >
-              {showBackfillPicker ? '收起回填会话' : '选择回填会话'}
-            </button>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => void handleRegenerate()}
-              disabled={regenerating || backfilling || clearing || importingHistory}
-            >
-              {regenerating ? '重新生成中...' : '重新生成画像'}
-            </button>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => void handleClearProfiles()}
-              disabled={regenerating || backfilling || clearing || importingHistory}
-            >
-              {clearing ? '清空中...' : '清空画像'}
-            </button>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => {
-                const profile = createDefaultUnifiedContactProfile(
-                  ownerUserId,
-                  createLocalId('contact'),
-                  '未命名好友'
-                )
-                const normalizedProfile = normalizeProfileDisplayName(profile)
-                setProfiles((current) => [normalizedProfile, ...current])
-                setSelectedProfileId(normalizedProfile.profile_id)
-                setDraft(deepClone(normalizedProfile))
-                setDetailTab('profile')
-              }}
-            >
-              新建好友
-            </button>
-            <button
-              type="button"
-              className="memory-refresh-btn"
-              onClick={() => {
-                const profile = createDefaultUnifiedUserProfile(ownerUserId, '我自己')
-                profile.profile_id = createLocalId('user')
-                setProfiles((current) => [profile, ...current])
-                const normalizedProfile = normalizeProfileDisplayName(profile)
-                setSelectedProfileId(normalizedProfile.profile_id)
-                setDraft(deepClone(normalizedProfile))
-                setDetailTab('profile')
-              }}
-            >
-              新建自己
-            </button>
             <button
               type="button"
               className={`memory-refresh-btn ${selectionMode ? 'active' : ''}`}
@@ -1119,6 +1401,58 @@ export function ProfileLibraryPanel({
             >
               {selectionMode ? '完成选择' : '批量选择'}
             </button>
+          </div>
+
+          {/* 行 4：语义分组按钮 */}
+          <div className="profile-mgmt-action-groups">
+            <div className="profile-action-group">
+              <span className="profile-action-group-label">新建</span>
+              <button
+                type="button"
+                className="memory-refresh-btn"
+                onClick={() => {
+                  const profile = createDefaultUnifiedContactProfile(
+                    ownerUserId,
+                    createLocalId('contact'),
+                    '未命名好友'
+                  )
+                  const normalizedProfile = normalizeProfileDisplayName(profile)
+                  setProfiles((current) => [normalizedProfile, ...current])
+                  setSelectedProfileId(normalizedProfile.profile_id)
+                  setDraft(deepClone(normalizedProfile))
+                  setDetailTab('profile')
+                }}
+              >
+                好友
+              </button>
+            </div>
+            <div className="profile-action-group">
+              <span className="profile-action-group-label">画像</span>
+              <button
+                type="button"
+                className={`memory-refresh-btn ${showBackfillPicker ? 'active' : ''}`}
+                onClick={() => setShowBackfillPicker((current) => !current)}
+                disabled={importingHistory}
+              >
+                {showBackfillPicker ? '收起回填' : '选择回填'}
+              </button>
+              <button
+                type="button"
+                className="memory-refresh-btn"
+                onClick={() => void handleRegenerate()}
+                disabled={regenerating || backfilling || clearing || importingHistory}
+              >
+                {regenerating ? '重新生成中...' : '重新生成'}
+              </button>
+              <button
+                type="button"
+                className="memory-refresh-btn danger"
+                onClick={() => void handleClearProfiles()}
+                disabled={regenerating || backfilling || clearing || importingHistory}
+              >
+                {clearing ? '清空中...' : '清空'}
+              </button>
+            </div>
             {selectionMode ? (
               <button
                 type="button"
@@ -1133,7 +1467,11 @@ export function ProfileLibraryPanel({
                 删除选中 ({selectedIds.length})
               </button>
             ) : null}
-            {showBackfillPicker ? (
+          </div>
+
+          {summaryMessage ? <p className="profile-backfill-summary">{summaryMessage}</p> : null}
+
+          {showBackfillPicker ? (
               <div className="profile-backfill-picker">
                 <div className="profile-current-user-row">
                   <strong>回填会话</strong>
@@ -1201,7 +1539,6 @@ export function ProfileLibraryPanel({
                 )}
               </div>
             ) : null}
-          </div>
         </div>
       </section>
 
@@ -1264,59 +1601,27 @@ export function ProfileLibraryPanel({
               <p className="profile-empty-hint">请选择一条画像进行查看或编辑。</p>
             ) : (
               <>
-                <div className="memory-detail-header">
-                  <div>
-                    <h3>
-                      {draft.display_name || '未命名画像'}
-                      <small>{formatProfileType(draft.profile_type)}</small>
-                    </h3>
-                    <span className="profile-detail-subtitle">
-                      {draft.conversation_id || draft.target_user_id || draft.owner_user_id}
-                    </span>
-                  </div>
-                  <div className="memory-detail-stats">
-                    <span>{formatTime(draft.metadata.last_updated || draft.metadata.created_at)}</span>
-                    <span>版本 {draft.metadata.version}</span>
-                  </div>
-                </div>
-
-                <div className="longterm-tab-row">
-                  <button
-                    type="button"
-                    className={`memory-refresh-btn ${detailTab === 'profile' ? 'active' : ''}`}
-                    onClick={() => setDetailTab('profile')}
-                  >
-                    画像
-                  </button>
-                  <button
-                    type="button"
-                    className={`memory-refresh-btn ${detailTab === 'episodes' ? 'active' : ''}`}
-                    onClick={() => setDetailTab('episodes')}
-                  >
-                    情节
-                  </button>
-                  <button
-                    type="button"
-                    className={`memory-refresh-btn ${detailTab === 'foresights' ? 'active' : ''}`}
-                    onClick={() => setDetailTab('foresights')}
-                  >
-                    前瞻
-                  </button>
-                </div>
-
-                <div className="longterm-tab-row">
-                  <button
-                    type="button"
-                    className={`memory-refresh-btn ${detailTab === 'memcells' ? 'active' : ''}`}
-                    onClick={() => setDetailTab('memcells')}
-                  >
-                    MemCell
-                  </button>
-                </div>
-
-                {detailTab === 'profile' ? (
-                  <>
-                    <div className="profile-editor-actions">
+                {/* ── 粘性顶栏 ── */}
+                <div className="profile-sticky-header">
+                  <div className="profile-sticky-top">
+                    <div className="profile-sticky-identity">
+                      <div className="profile-avatar-circle">
+                        {(draft.display_name || '?').slice(0, 1)}
+                      </div>
+                      <div>
+                        <div className="profile-sticky-name">
+                          {draft.display_name || '未命名画像'}
+                          <small>{formatProfileType(draft.profile_type)}</small>
+                        </div>
+                        <div className="profile-sticky-sub">
+                          {draft.conversation_id || draft.target_user_id || draft.owner_user_id}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="profile-sticky-actions">
+                      <span className="profile-sticky-time">
+                        {formatTime(draft.metadata.last_updated || draft.metadata.created_at)}
+                      </span>
                       <button
                         type="button"
                         className="memory-refresh-btn"
@@ -1333,6 +1638,23 @@ export function ProfileLibraryPanel({
                         删除
                       </button>
                     </div>
+                  </div>
+                  <div className="profile-sticky-tabs">
+                    {(['profile', 'episodes', 'foresights', 'memcells'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className={`profile-tab-btn${detailTab === tab ? ' active' : ''}`}
+                        onClick={() => setDetailTab(tab)}
+                      >
+                        {tab === 'profile' ? '画像' : tab === 'episodes' ? '情节' : tab === 'foresights' ? '前瞻' : 'MemCell'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {detailTab === 'profile' ? (
+                  <>
                     {draft.profile_type === 'user' ? (
                       <EditableUserProfileFields draft={draft} onChange={setDraft} />
                     ) : (
@@ -1341,12 +1663,9 @@ export function ProfileLibraryPanel({
                     <ProfileFactsSection draft={draft} />
                     <ProfileSystemSection draft={draft} />
                     <section className="profile-section">
-                      <div className="profile-section-head">
-                        <h4>原始 JSON</h4>
-                      </div>
                       <details>
-                        <summary>展开原始 JSON</summary>
-                        <pre className="memory-detail-content">{JSON.stringify(draft, null, 2)}</pre>
+                        <summary className="profile-json-summary">原始 JSON</summary>
+                        <pre className="memory-detail-content">{JSON.stringify(buildRawJsonPreview(draft), null, 2)}</pre>
                       </details>
                     </section>
                   </>
@@ -1358,7 +1677,7 @@ export function ProfileLibraryPanel({
                     emptyText="当前好友还没有 MemCell 记录。"
                     items={selectedMemcells}
                     renderItem={(item) => (
-                      <MemCellItemCard key={item.memcell_id} item={item} />
+                      <MemCellItemCard key={item.memcell_id} item={item} profiles={profiles} />
                     )}
                   />
                 ) : null}
@@ -1368,21 +1687,7 @@ export function ProfileLibraryPanel({
                     emptyText="当前好友还没有情节记录。"
                     items={selectedEpisodes}
                     renderItem={(item) => (
-                      <article key={item.episode_id} className="longterm-inline-item episode-inline-item">
-                        <div className="longterm-inline-item-head">
-                          <strong>{item.subject || item.summary || '未命名情节'}</strong>
-                          <span>{formatTime(item.updated_at || item.timestamp)}</span>
-                        </div>
-                        <p>{item.episode || item.summary || '暂无内容'}</p>
-                        <div className="memory-tag-row">
-                          {item.participants.slice(0, 4).map((participant) => (
-                            <em key={participant}>{participant}</em>
-                          ))}
-                          {item.keywords.slice(0, 4).map((keyword) => (
-                            <em key={keyword}>{keyword}</em>
-                          ))}
-                        </div>
-                      </article>
+                      <EpisodeCard key={item.episode_id} item={item} profiles={profiles} />
                     )}
                   />
                 ) : null}
@@ -1393,22 +1698,7 @@ export function ProfileLibraryPanel({
                     emptyText="当前好友还没有前瞻记录。"
                     items={selectedForesights}
                     renderItem={(item) => (
-                      <article key={item.foresight_id} className="longterm-inline-item">
-                        <div className="longterm-inline-item-head">
-                          <strong>{item.content || '未命名前瞻'}</strong>
-                          <span>{formatTime(item.updated_at || item.start_time)}</span>
-                        </div>
-                        <p>
-                          {item.start_time ? `开始：${formatTime(item.start_time)}` : '未设置开始时间'}
-                          {item.end_time ? ` · 结束：${formatTime(item.end_time)}` : ''}
-                        </p>
-                        <div className="memory-tag-row">
-                          {item.participants.slice(0, 4).map((participant) => (
-                            <em key={participant}>{participant}</em>
-                          ))}
-                          {item.duration_days != null ? <em>{item.duration_days} 天</em> : null}
-                        </div>
-                      </article>
+                      <ForesightCard key={item.foresight_id} item={item} profiles={profiles} />
                     )}
                   />
                 ) : null}
@@ -1469,6 +1759,25 @@ function ProfileListSection({
       {profiles.map((profile) => {
         const active = selectedProfileId === profile.profile_id
         const checked = selectedIds.includes(profile.profile_id)
+        const summary = buildProfileSummary(profile)
+        const summaryParts = summary ? summary.split(' · ').filter(Boolean) : []
+        const isSelfProfile = profile.profile_type === 'user'
+        const summaryTokens = summary
+          .split(/[|,??\s]+/)
+          .map((item) => item.trim().toLowerCase())
+          .filter(Boolean)
+        const rawTags = getFieldValues(profile.traits as ProfileField[] | string[]).length > 0
+          ? getFieldValues(profile.traits as ProfileField[] | string[])
+          : getFieldValues(profile.interests as ProfileField[] | string[])
+        const dedupedTags: string[] = []
+        for (const tag of rawTags) {
+          const normalized = tag.trim().toLowerCase()
+          if (!normalized) continue
+          if (summaryTokens.includes(normalized)) continue
+          if (dedupedTags.some((existing) => existing.trim().toLowerCase() === normalized)) continue
+          dedupedTags.push(tag)
+        }
+
         return (
           <button
             key={profile.profile_id}
@@ -1496,24 +1805,29 @@ function ProfileListSection({
               </label>
             ) : null}
             <div className="memory-item-title-row">
-              <strong>{profile.display_name || '未命名画像'}</strong>
+              <strong>{profile.display_name || '?????'}</strong>
               <div className="memory-item-head-actions">
                 <span>{formatTime(profile.metadata.last_updated || profile.metadata.created_at)}</span>
               </div>
             </div>
-            <p>{buildProfileSummary(profile)}</p>
-            <div className="memory-item-meta">
-              <span>{formatRole(profile.social_attributes.role)}</span>
-              <span>{formatIntimacy(profile.social_attributes.intimacy_level)}</span>
-            </div>
-            <div className="memory-tag-row">
-              {getFieldValues(profile.traits as ProfileField[] | string[]).slice(0, 4).map((trait) => (
-                <em key={trait}>{trait}</em>
-              ))}
-              {getFieldValues(profile.traits as ProfileField[] | string[]).length === 0
-                ? getFieldValues(profile.interests as ProfileField[] | string[]).slice(0, 3).map((interest) => <em key={interest}>{interest}</em>)
-                : null}
-            </div>
+            {!isSelfProfile ? (
+              <div className="memory-tag-row">
+                {profile.social_attributes.role && profile.social_attributes.role !== 'unknown' ? (
+                  <em>{formatRole(profile.social_attributes.role)}</em>
+                ) : null}
+                <em>{formatIntimacy(profile.social_attributes.intimacy_level)}</em>
+              </div>
+            ) : null}
+            {summaryParts.length > 0 || dedupedTags.length > 0 ? (
+              <div className="memory-tag-row">
+                {summaryParts.map((part) => (
+                  <em key={part}>{part}</em>
+                ))}
+                {dedupedTags.slice(0, 3).map((tag) => (
+                  <em key={tag}>{tag}</em>
+                ))}
+              </div>
+            ) : null}
           </button>
         )
       })}
@@ -1521,51 +1835,207 @@ function ProfileListSection({
   )
 }
 
-function MemCellItemCard({ item }: { item: MemCellItem }): JSX.Element {
+function ForesightCard({
+  item,
+  profiles,
+}: {
+  item: ForesightItem
+  profiles: UnifiedProfile[]
+}): JSX.Element {
+  const status = getForesightStatus(item)
+  const statusLabel = status === 'active' ? '进行中' : status === 'upcoming' ? '计划中' : '已过期'
+  return (
+    <article className={`unified-card foresight-${status}`}>
+      <div className="unified-card-bar foresight-bar" />
+      <div className="unified-card-body">
+        <div className="unified-card-head">
+          <strong className="unified-card-title">{item.content || '未命名前瞻'}</strong>
+          <div className="foresight-head-right">
+            <span className={`foresight-status-label foresight-label-${status}`}>{statusLabel}</span>
+            <span className="unified-card-date">{formatDate(item.updated_at)}</span>
+          </div>
+        </div>
+        {item.start_time || item.end_time || item.duration_days != null ? (
+          <div className="foresight-time-row">
+            {item.start_time ? (
+              <span className="foresight-time-badge">{formatTime(item.start_time)}</span>
+            ) : null}
+            {item.start_time && item.end_time ? (
+              <span className="foresight-arrow">→</span>
+            ) : null}
+            {item.end_time ? (
+              <span className="foresight-time-badge">{formatTime(item.end_time)}</span>
+            ) : null}
+            {item.duration_days != null ? (
+              <span className={`foresight-duration-pill foresight-pill-${status}`}>
+                {status === 'active' ? <span className="foresight-dot" /> : null}
+                {item.duration_days} 天
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {item.participants.length > 0 ? (
+          <div className="unified-tag-row">
+            {item.participants.slice(0, 4).map((participant) => {
+              const matched = profiles.find(
+                (p) => normalizeText(p.target_user_id) === normalizeText(participant)
+              )
+              const displayName = matched?.display_name
+              const isResolved = displayName && displayName !== participant
+              return isResolved ? (
+                <span key={participant} className="unified-tag-name">{displayName}</span>
+              ) : (
+                <span key={participant} className="unified-tag">{truncateParticipantId(participant)}</span>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
+function EpisodeCard({
+  item,
+  profiles,
+}: {
+  item: EpisodicMemoryItem
+  profiles: UnifiedProfile[]
+}): JSX.Element {
   const [expanded, setExpanded] = useState(false)
 
+  // summary IS the episode narrative — use it as body, never as a title
+  const bodyText = item.summary || item.episode || ''
+  const isLong = bodyText.length > 120 || bodyText.split('\n').length > 3
+
+  const people: Array<{ id: string; name: string }> = []
+  const rawIds: string[] = []
+  for (const participant of item.participants) {
+    const matched = profiles.find(
+      (p) => normalizeText(p.target_user_id) === normalizeText(participant)
+    )
+    const displayName = matched?.display_name
+    if (displayName && displayName !== participant) {
+      people.push({ id: participant, name: displayName })
+    } else {
+      rawIds.push(participant)
+    }
+  }
+
   return (
-    <article className="longterm-inline-item memcell-item-card">
-      <div className="longterm-inline-item-head">
-        <strong>{item.summary || item.subject || '未命名 MemCell'}</strong>
-        <span>{formatTime(item.updated_at || item.timestamp)}</span>
-      </div>
-      <p className="memcell-summary">{item.episode || item.subject || '暂无 MemCell 内容'}</p>
-      <div className="memory-tag-row">
-        {item.participants.slice(0, 4).map((participant) => (
-          <em key={participant}>{participant}</em>
-        ))}
-        {item.keywords.slice(0, 4).map((keyword) => (
-          <em key={keyword}>{keyword}</em>
-        ))}
-        {item.type ? <em>{item.type}</em> : null}
-        <em>消息 {item.original_data_count}</em>
-        <em>前瞻 {item.foresight_count}</em>
-      </div>
-      {item.original_data.length > 0 ? (
-        <div className="memcell-messages-section">
-          <button
-            type="button"
-            className="memory-refresh-btn memcell-toggle-btn"
-            onClick={() => setExpanded((prev) => !prev)}
-          >
-            {expanded ? '收起对话' : `展开对话 (${item.original_data.length} 条)`}
-          </button>
-          {expanded ? (
-            <div className="memcell-messages-list">
-              {item.original_data.map((msg, idx) => (
-                <div key={`${idx}-${msg.timestamp || ''}`} className="memcell-message-item">
-                  <span className="memcell-message-speaker">
-                    {msg.speaker_name || msg.speaker_id || '未知'}
-                  </span>
-                  <span className="memcell-message-content">{msg.content}</span>
-                  <span className="memcell-message-time">{formatTime(msg.timestamp)}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+    <article
+      className={`unified-card unified-card-green${isLong ? ' unified-card-clickable' : ''}`}
+      onClick={() => { if (isLong) setExpanded((c) => !c) }}
+    >
+      <div className="unified-card-bar" />
+      <div className="unified-card-body">
+        {/* body text, collapsed by default */}
+        <div className={expanded ? 'unified-summary-wrap' : 'unified-summary-wrap unified-summary-collapsed'}>
+          <p className="unified-summary-text">{bodyText}</p>
         </div>
-      ) : null}
+        {isLong ? (
+          <div className="unified-expand-hint">
+            <span className={`unified-expand-arrow${expanded ? ' up' : ''}`}>▾</span>
+            {expanded ? '收起' : '展开全文'}
+          </div>
+        ) : null}
+        {/* participants + keywords + date on the same bottom row */}
+        <div className="episode-bottom-row">
+          <div className="unified-tag-row">
+            {people.map((p) => (
+              <span key={p.id} className="unified-tag-name">{p.name}</span>
+            ))}
+            {rawIds.map((id) => (
+              <span key={id} className="unified-tag">{truncateParticipantId(id)}</span>
+            ))}
+            {item.keywords.slice(0, 3).map((kw) => (
+              <span key={kw} className="unified-tag">{kw}</span>
+            ))}
+          </div>
+          <span className="unified-card-date">{formatDate(item.updated_at || item.timestamp)}</span>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function MemCellItemCard({ item, profiles }: { item: MemCellItem; profiles: UnifiedProfile[] }): JSX.Element {
+  const [summaryExpanded, setSummaryExpanded] = useState(false)
+  const [messagesExpanded, setMessagesExpanded] = useState(false)
+
+  const rawTitle = item.summary || item.subject || '未命名 MemCell'
+  const title = rawTitle.replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/, '')
+  const bodyText = item.episode && item.episode !== item.summary ? item.episode : (item.subject && item.subject !== item.summary ? item.subject : '')
+  const isLong = bodyText.length > 120 || bodyText.split('\n').length > 3
+
+  const people: Array<{ id: string; name: string }> = []
+  const rawIds: string[] = []
+  for (const participant of item.participants) {
+    const matched = profiles.find(
+      (p) => normalizeText(p.target_user_id) === normalizeText(participant)
+    )
+    const displayName = matched?.display_name
+    if (displayName && displayName !== participant) {
+      people.push({ id: participant, name: displayName })
+    } else {
+      rawIds.push(participant)
+    }
+  }
+
+  return (
+    <article
+      className={`unified-card unified-card-blue${isLong ? ' unified-card-clickable' : ''}`}
+      onClick={() => { if (isLong) setSummaryExpanded((c) => !c) }}
+    >
+      <div className="unified-card-bar" />
+      <div className="unified-card-body">
+        <div className="unified-card-head">
+          <strong className="unified-card-title">{title}</strong>
+          <span className="unified-card-date">{formatDate(item.updated_at || item.timestamp)}</span>
+        </div>
+        {bodyText ? (
+          <div className={summaryExpanded ? 'unified-summary-wrap' : 'unified-summary-wrap unified-summary-collapsed'}>
+            <p className="unified-summary-text">{bodyText}</p>
+          </div>
+        ) : null}
+        <div className="unified-tag-row">
+          {people.map((p) => (
+            <span key={p.id} className="unified-tag-name">{p.name}</span>
+          ))}
+          {rawIds.slice(0, 4).map((id) => (
+            <span key={id} className="unified-tag">{truncateParticipantId(id)}</span>
+          ))}
+          {item.keywords.slice(0, 3).map((kw) => (
+            <span key={kw} className="unified-tag">{kw}</span>
+          ))}
+        </div>
+        {item.original_data.length > 0 ? (
+          <div
+            className="unified-card-footer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="unified-expand-btn"
+              onClick={() => setMessagesExpanded((prev) => !prev)}
+            >
+              {messagesExpanded ? '收起对话' : `展开对话 (${item.original_data.length} 条)`}
+              <span className={`unified-expand-arrow${messagesExpanded ? ' up' : ''}`}>▾</span>
+            </button>
+            {messagesExpanded ? (
+              <div className="memcell-messages-list">
+                {item.original_data.map((msg, idx) => (
+                  <div key={`${idx}-${msg.timestamp ?? ''}`} className="memcell-message-item">
+                    <span className="memcell-message-speaker">{msg.speaker_name || msg.speaker_id || '未知'}</span>
+                    <span className="memcell-message-content">{msg.content}</span>
+                    <span className="memcell-message-time">{formatTime(msg.timestamp)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </article>
   )
 }
@@ -1775,18 +2245,19 @@ function ProfileSystemSection({
       <div className="profile-section-head">
         <h4>系统信息</h4>
       </div>
-      <div className="profile-editor-grid">
-        <ReadonlyField label="Profile ID" value={draft.profile_id} />
-        <ReadonlyField label="Owner User ID" value={draft.owner_user_id} />
-        <ReadonlyField label="Target User ID" value={draft.target_user_id ?? ''} />
-        <ReadonlyField label="Conversation ID" value={draft.conversation_id ?? ''} />
-        <ReadonlyField label="创建时间" value={draft.metadata.created_at} />
-        <ReadonlyField label="最后更新" value={draft.metadata.last_updated} />
-        <ReadonlyField label="版本" value={`${draft.metadata.version}`} />
-        <ReadonlyField label="来源 MemCell 数" value={`${draft.metadata.source_memcell_count}`} />
-        <ReadonlyField label="风险等级" value={risk ? formatRiskLevel(risk.risk_level) : '无'} />
-        <ReadonlyField label="风险提示" value={risk?.warning_msg ?? ''} wide />
-      </div>
+      <dl className="profile-sys-grid">
+        <div><dt>画像 ID</dt><dd>{draft.profile_id}</dd></div>
+        <div><dt>OWNER 用户 ID</dt><dd>{draft.owner_user_id}</dd></div>
+        <div><dt>目标用户 ID</dt><dd>{draft.target_user_id ?? '未设置'}</dd></div>
+        <div><dt>会话 ID</dt><dd>{draft.conversation_id ?? '未设置'}</dd></div>
+        <div><dt>创建时间</dt><dd>{formatTime(draft.metadata.created_at)}</dd></div>
+        <div><dt>最后更新</dt><dd>{formatTime(draft.metadata.last_updated)}</dd></div>
+        <div><dt>来源 MemCell 数</dt><dd>{String(draft.metadata.source_memcell_count)}</dd></div>
+        <div><dt>风险等级</dt><dd>{risk ? formatRiskLevel(risk.risk_level) : '无'}</dd></div>
+        {risk?.warning_msg ? (
+          <div className="sys-wide"><dt>风险提示</dt><dd>{risk.warning_msg}</dd></div>
+        ) : null}
+      </dl>
     </section>
   )
 }
@@ -1798,93 +2269,60 @@ function EditableUserProfileFields({
   draft: UnifiedProfile
   onChange: (profile: UnifiedProfile) => void
 }): JSX.Element {
+  const attrKeys: ListFieldKey[] = [
+    'occupation', 'traits', 'personality', 'interests',
+    'way_of_decision_making', 'life_habit_preference', 'communication_style',
+    'catchphrase', 'motivation_system', 'fear_system', 'value_system', 'humor_use'
+  ]
+  const nonEmptyKeys = attrKeys.filter((k) => normalizeProfileFieldList((draft as Record<string, unknown>)[k]).length > 0)
+  const emptyKeys = attrKeys.filter((k) => normalizeProfileFieldList((draft as Record<string, unknown>)[k]).length === 0)
+
   return (
-    <section className="profile-section">
-      <div className="profile-section-head">
-        <h4>画像编辑</h4>
-      </div>
-      <div className="profile-editor-grid">
-        <InputField label="显示名称" value={draft.display_name} onChange={(value) => onChange({ ...draft, display_name: value })} />
-        <TextareaField label="别名" value={draft.aliases.join('，')} onChange={(value) => onChange({ ...draft, aliases: splitList(value) })} />
-        {/* 单值字段 */}
-        <InputField
-          label="性别"
-          value={getFieldValue(draft.gender as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, gender: value ? { value, evidence_level: 'L1', evidences: [] } : null })}
-        />
-        <InputField
-          label="年龄"
-          value={getFieldValue(draft.age as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, age: value ? { value, evidence_level: 'L2', evidences: [] } : null })}
-        />
-        <InputField
-          label="学历"
-          value={getFieldValue(draft.education_level as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, education_level: value ? { value, evidence_level: 'L2', evidences: [] } : null })}
-        />
-        {/* 列表字段 - 显示 [L1]/[L2] 前缀 */}
-        <TextareaField
-          label="职业"
-          value={formatFieldsWithLevel(draft.occupation as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, occupation: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="性格特征（英文）"
-          value={formatFieldsWithLevel(draft.traits as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, traits: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="人格描述（中文）"
-          value={formatFieldsWithLevel(draft.personality as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, personality: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="兴趣偏好"
-          value={formatFieldsWithLevel(draft.interests as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, interests: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="决策方式"
-          value={formatFieldsWithLevel(draft.way_of_decision_making as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, way_of_decision_making: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="生活偏好"
-          value={formatFieldsWithLevel(draft.life_habit_preference as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, life_habit_preference: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="沟通风格"
-          value={formatFieldsWithLevel(draft.communication_style as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, communication_style: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="口头禅"
-          value={formatFieldsWithLevel(draft.catchphrase as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, catchphrase: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="动机系统"
-          value={formatFieldsWithLevel(draft.motivation_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, motivation_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="恐惧系统"
-          value={formatFieldsWithLevel(draft.fear_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, fear_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="价值系统"
-          value={formatFieldsWithLevel(draft.value_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, value_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="幽默风格"
-          value={formatFieldsWithLevel(draft.humor_use as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, humor_use: parseFieldsWithLevel(value, 'L1') })}
-        />
-      </div>
-    </section>
+    <>
+      <section className="profile-section">
+        <div className="profile-section-head"><h4>基本信息</h4></div>
+        <div className="profile-basic-table">
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">显示名称</span>
+            <input className="profile-basic-input" value={draft.display_name} onChange={(e) => onChange({ ...draft, display_name: e.target.value })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">学历</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.education_level as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, education_level: e.target.value ? { value: e.target.value, evidence_level: 'L2', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">性别</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.gender as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, gender: e.target.value ? { value: e.target.value, evidence_level: 'L1', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">年龄</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.age as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, age: e.target.value ? { value: e.target.value, evidence_level: 'L2', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row full-width">
+            <span className="profile-basic-label">别名</span>
+            <input className="profile-basic-input" value={draft.aliases.join('，')} onChange={(e) => onChange({ ...draft, aliases: splitList(e.target.value) })} />
+          </div>
+        </div>
+      </section>
+      <section className="profile-section">
+        <div className="profile-section-head"><h4>画像属性</h4></div>
+        <div className="profile-editor-grid">
+          {nonEmptyKeys.map((k) => (
+            <ProfileListFieldCard key={k} fieldKey={k} value={(draft as Record<string, unknown>)[k]} onChange={(next) => onChange({ ...draft, [k]: next })} />
+          ))}
+          {emptyKeys.length > 0 ? (
+            <details className="profile-empty-group profile-editor-field-wide">
+              <summary>{emptyKeys.length} 个属性暂无条目</summary>
+              <div className="profile-editor-grid" style={{ marginTop: 10 }}>
+                {emptyKeys.map((k) => (
+                  <ProfileListFieldCard key={k} fieldKey={k} value={(draft as Record<string, unknown>)[k]} onChange={(next) => onChange({ ...draft, [k]: next })} />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </section>
+    </>
   )
 }
 
@@ -1903,180 +2341,97 @@ function EditableContactProfileFields({
     last_checked: null
   }
 
+  const attrKeys: ListFieldKey[] = [
+    'occupation', 'relationship', 'traits', 'personality', 'interests',
+    'way_of_decision_making', 'life_habit_preference', 'communication_style',
+    'catchphrase', 'user_to_friend_catchphrase', 'user_to_friend_chat_style',
+    'motivation_system', 'fear_system', 'value_system', 'humor_use'
+  ]
+  const nonEmptyKeys = attrKeys.filter((k) => normalizeProfileFieldList((draft as Record<string, unknown>)[k]).length > 0)
+  const emptyKeys = attrKeys.filter((k) => normalizeProfileFieldList((draft as Record<string, unknown>)[k]).length === 0)
+
   return (
-    <section className="profile-section">
-      <div className="profile-section-head">
-        <h4>画像编辑</h4>
-      </div>
-      <div className="profile-editor-grid">
-        <InputField label="显示名称" value={draft.display_name} onChange={(value) => onChange({ ...draft, display_name: value })} />
-        <TextareaField label="别名" value={draft.aliases.join('，')} onChange={(value) => onChange({ ...draft, aliases: splitList(value) })} />
-        {/* 单值字段 */}
-        <InputField
-          label="性别"
-          value={getFieldValue(draft.gender as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, gender: value ? { value, evidence_level: 'L1', evidences: [] } : null })}
-        />
-        <InputField
-          label="年龄"
-          value={getFieldValue(draft.age as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, age: value ? { value, evidence_level: 'L2', evidences: [] } : null })}
-        />
-        <InputField
-          label="学历"
-          value={getFieldValue(draft.education_level as ProfileField | string | null)}
-          onChange={(value) => onChange({ ...draft, education_level: value ? { value, evidence_level: 'L2', evidences: [] } : null })}
-        />
-        <SelectField
-          label="熟悉程度"
-          value={getFieldValue(draft.intimacy_level as ProfileField | string | null) || 'stranger'}
-          options={[
-            ['stranger', '陌生'],
-            ['formal', '正式'],
-            ['close', '熟悉'],
-            ['intimate', '亲密']
-          ]}
-          onChange={(value) =>
-            onChange({ ...draft, intimacy_level: { value, evidence_level: 'L2', evidences: [] } })
-          }
-        />
-        {/* 列表字段 - 显示 [L1]/[L2] 前缀 */}
-        <TextareaField
-          label="职业"
-          value={formatFieldsWithLevel(draft.occupation as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, occupation: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="关系"
-          value={formatFieldsWithLevel(draft.relationship as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, relationship: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="性格特征（英文）"
-          value={formatFieldsWithLevel(draft.traits as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, traits: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="人格描述（中文）"
-          value={formatFieldsWithLevel(draft.personality as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, personality: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="兴趣偏好"
-          value={formatFieldsWithLevel(draft.interests as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, interests: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="决策方式"
-          value={formatFieldsWithLevel(draft.way_of_decision_making as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, way_of_decision_making: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="生活偏好"
-          value={formatFieldsWithLevel(draft.life_habit_preference as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, life_habit_preference: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="沟通风格"
-          value={formatFieldsWithLevel(draft.communication_style as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, communication_style: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="口头禅"
-          value={formatFieldsWithLevel(draft.catchphrase as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, catchphrase: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="对好友称呼"
-          value={formatFieldsWithLevel(draft.user_to_friend_catchphrase as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, user_to_friend_catchphrase: parseFieldsWithLevel(value, 'L1') })}
-        />
-        <TextareaField
-          label="对好友风格"
-          value={formatFieldsWithLevel(draft.user_to_friend_chat_style as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, user_to_friend_chat_style: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="动机系统"
-          value={formatFieldsWithLevel(draft.motivation_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, motivation_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="恐惧系统"
-          value={formatFieldsWithLevel(draft.fear_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, fear_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="价值系统"
-          value={formatFieldsWithLevel(draft.value_system as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, value_system: parseFieldsWithLevel(value, 'L2') })}
-        />
-        <TextareaField
-          label="幽默风格"
-          value={formatFieldsWithLevel(draft.humor_use as ProfileField[] | string[])}
-          onChange={(value) => onChange({ ...draft, humor_use: parseFieldsWithLevel(value, 'L1') })}
-        />
-        {/* 中间人信息 */}
-        <InputField
-          label="中间人姓名"
-          value={draft.social_attributes.intermediary.name ?? ''}
-          onChange={(value) =>
-            onChange({
-              ...draft,
-              social_attributes: {
-                ...draft.social_attributes,
-                intermediary: { ...draft.social_attributes.intermediary, name: value || null, has_intermediary: !!value }
-              }
-            })
-          }
-        />
-        <TextareaField
-          label="中间人背景"
-          value={draft.social_attributes.intermediary.context ?? ''}
-          onChange={(value) =>
-            onChange({
-              ...draft,
-              social_attributes: {
-                ...draft.social_attributes,
-                intermediary: { ...draft.social_attributes.intermediary, context: value || null }
-              }
-            })
-          }
-        />
-        {/* 风险评估 */}
-        <SelectField
-          label="风险等级"
-          value={risk.risk_level}
-          options={[
-            ['low', '低'],
-            ['medium', '中'],
-            ['high', '高']
-          ]}
-          onChange={(value) =>
-            onChange({
-              ...draft,
-              risk_assessment: {
-                ...risk,
-                risk_level: value as NonNullable<UnifiedProfile['risk_assessment']>['risk_level']
-              }
-            })
-          }
-        />
-        <TextareaField
-          label="风险提示"
-          value={risk.warning_msg}
-          onChange={(value) =>
-            onChange({
-              ...draft,
-              risk_assessment: { ...risk, warning_msg: value }
-            })
-          }
-        />
-      </div>
-    </section>
+    <>
+      <section className="profile-section">
+        <div className="profile-section-head"><h4>基本信息</h4></div>
+        <div className="profile-basic-table">
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">显示名称</span>
+            <input className="profile-basic-input" value={draft.display_name} onChange={(e) => onChange({ ...draft, display_name: e.target.value })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">熟悉程度</span>
+            <select
+              className="profile-basic-input"
+              value={getFieldValue(draft.intimacy_level as ProfileField | string | null) || 'stranger'}
+              onChange={(e) => onChange({ ...draft, intimacy_level: { value: e.target.value, evidence_level: 'L2', evidences: [] } })}
+            >
+              <option value="stranger">陌生</option>
+              <option value="formal">正式</option>
+              <option value="close">熟悉</option>
+              <option value="intimate">亲密</option>
+            </select>
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">性别</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.gender as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, gender: e.target.value ? { value: e.target.value, evidence_level: 'L1', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">年龄</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.age as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, age: e.target.value ? { value: e.target.value, evidence_level: 'L2', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">学历</span>
+            <input className="profile-basic-input" placeholder="未填写" value={getFieldValue(draft.education_level as ProfileField | string | null)} onChange={(e) => onChange({ ...draft, education_level: e.target.value ? { value: e.target.value, evidence_level: 'L2', evidences: [] } : null })} />
+          </div>
+          <div className="profile-basic-row">
+            <span className="profile-basic-label">风险等级</span>
+            <select
+              className="profile-basic-input"
+              value={risk.risk_level}
+              onChange={(e) => onChange({ ...draft, risk_assessment: { ...risk, risk_level: e.target.value as NonNullable<UnifiedProfile['risk_assessment']>['risk_level'] } })}
+            >
+              <option value="low">低</option>
+              <option value="medium">中</option>
+              <option value="high">高</option>
+            </select>
+          </div>
+          <div className="profile-basic-row full-width">
+            <span className="profile-basic-label">别名</span>
+            <input className="profile-basic-input" value={draft.aliases.join('，')} onChange={(e) => onChange({ ...draft, aliases: splitList(e.target.value) })} />
+          </div>
+          <div className="profile-basic-row full-width">
+            <span className="profile-basic-label">中间人姓名</span>
+            <input
+              className="profile-basic-input"
+              placeholder="未填写"
+              value={draft.social_attributes.intermediary.name ?? ''}
+              onChange={(e) => onChange({ ...draft, social_attributes: { ...draft.social_attributes, intermediary: { ...draft.social_attributes.intermediary, name: e.target.value || null, has_intermediary: !!e.target.value } } })}
+            />
+          </div>
+        </div>
+      </section>
+      <section className="profile-section">
+        <div className="profile-section-head"><h4>画像属性</h4></div>
+        <div className="profile-editor-grid">
+          {nonEmptyKeys.map((k) => (
+            <ProfileListFieldCard key={k} fieldKey={k} value={(draft as Record<string, unknown>)[k]} onChange={(next) => onChange({ ...draft, [k]: next })} />
+          ))}
+          {emptyKeys.length > 0 ? (
+            <details className="profile-empty-group profile-editor-field-wide">
+              <summary>{emptyKeys.length} 个属性暂无条目</summary>
+              <div className="profile-editor-grid" style={{ marginTop: 10 }}>
+                {emptyKeys.map((k) => (
+                  <ProfileListFieldCard key={k} fieldKey={k} value={(draft as Record<string, unknown>)[k]} onChange={(next) => onChange({ ...draft, [k]: next })} />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </section>
+    </>
   )
 }
-
 export function FactsEditor({
   draft,
   onChange

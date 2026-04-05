@@ -4,8 +4,10 @@ import {
   assistantTimeoutMsToSeconds,
   assistantTimeoutSecondsToMs,
   captureSensitivityToScheme,
+  formatCleanupResultMessage,
   chatRecordCaptureDedupWindowMsToSeconds,
-  chatRecordCaptureDedupWindowSecondsToMs
+  chatRecordCaptureDedupWindowSecondsToMs,
+  normalizeCleanupRetentionHours
 } from './MainConsoleApp'
 
 describe('MainConsoleApp visual monitor helpers', () => {
@@ -33,5 +35,33 @@ describe('MainConsoleApp visual monitor helpers', () => {
     expect(captureSensitivityToScheme('high')).toBe('legacy')
     expect(captureSensitivityToScheme('medium')).toBe('current')
     expect(captureSensitivityToScheme('low')).toBe('current')
+  })
+
+  it('normalizes cleanup retention hours with default and minimum fallback', () => {
+    expect(normalizeCleanupRetentionHours('24')).toBe(24)
+    expect(normalizeCleanupRetentionHours('0')).toBe(1)
+    expect(normalizeCleanupRetentionHours('')).toBe(24)
+  })
+
+  it('formats cleanup result summary message', () => {
+    const message = formatCleanupResultMessage({
+      cutoffIso: '2026-04-05T00:00:00.000Z',
+      chat: {
+        scannedSessions: 3,
+        deletedMessages: 8,
+        deletedFiles: 1,
+        errors: 0
+      },
+      cache: {
+        scannedFiles: 5,
+        deletedFiles: 2,
+        deletedDirs: 1,
+        errors: 0,
+        skippedActiveRunDir: true
+      }
+    })
+
+    expect(message).toContain('聊天记录删除 8 条消息')
+    expect(message).toContain('缓存删除 2 个文件、1 个目录')
   })
 })

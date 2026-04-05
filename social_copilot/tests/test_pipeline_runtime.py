@@ -417,6 +417,9 @@ async def test_pipeline_skips_vlm_on_unchanged_frame() -> None:
 
     assert fake_vlm.full_calls == 1
     assert fake_vlm.incremental_calls == []
+    debug = pipeline.get_debug_state()
+    assert debug["last_capture_result"] == "captured_no_change"
+    assert debug["capture_attempt_total"] == 2
 
 
 @pytest.mark.asyncio
@@ -575,6 +578,77 @@ async def test_pipeline_skips_capture_when_window_gate_mismatch() -> None:
     assert result.events_emitted == 0
     assert capture.calls == 0
     assert probe.app_queries == 1
+
+
+@pytest.mark.asyncio
+async def test_pipeline_allows_capture_when_frontmost_is_wechat_alias() -> None:
+    cfg = MonitorConfig()
+    cfg.monitor.window_gate.enabled = True
+    cfg.monitor.window_gate.app_name = "WeChat"
+    cfg.monitor.window_gate.app_aliases = ["WeChat", "WeChatAppEx", "Weixin"]
+    metrics = MonitorMetrics()
+    capture = _FakeCapture([b"frame_alias"])
+    probe = _FakeWindowProbe(app_name="WeChatAppEx")
+
+    pipeline = VisualMonitorPipeline(
+        config=cfg,
+        capture_adapter=capture,
+        change_detector=ChangeDetector(),
+        ocr_orchestrator=_FakeOCR([object()]),
+        parser=None,
+        assembler=StreamAssembler(),
+        output_gateway=OutputGateway(_make_event_bus(metrics)),
+        scheduler=CaptureScheduler(),
+        preprocessor=FramePreprocessor(),
+        roi_resolver=None,
+        debug_storage=DebugFrameStorage(enabled=False, base_dir="/tmp/social_debug_test"),
+        metrics=metrics,
+        session_id="sess-test",
+        window_id="window-test",
+        window_probe=probe,
+    )
+
+    result = await pipeline.run_once()
+    debug = pipeline.get_debug_state()
+    assert result.changed is True
+    assert capture.calls == 1
+    assert debug["last_capture_result"] == "captured_changed"
+    assert debug["last_gate_skip_reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_pipeline_debug_marks_gate_skip_reason_and_capture_result() -> None:
+    cfg = MonitorConfig()
+    cfg.monitor.window_gate.enabled = True
+    cfg.monitor.window_gate.app_name = "WeChat"
+    metrics = MonitorMetrics()
+    capture = _FakeCapture([b"frame_a"])
+    probe = _FakeWindowProbe(app_name="Code")
+
+    pipeline = VisualMonitorPipeline(
+        config=cfg,
+        capture_adapter=capture,
+        change_detector=ChangeDetector(),
+        ocr_orchestrator=_FakeOCR([object()]),
+        parser=None,
+        assembler=StreamAssembler(),
+        output_gateway=OutputGateway(_make_event_bus(metrics)),
+        scheduler=CaptureScheduler(),
+        preprocessor=FramePreprocessor(),
+        roi_resolver=None,
+        debug_storage=DebugFrameStorage(enabled=False, base_dir="/tmp/social_debug_test"),
+        metrics=metrics,
+        session_id="sess-test",
+        window_id="window-test",
+        window_probe=probe,
+    )
+
+    result = await pipeline.run_once()
+    debug = pipeline.get_debug_state()
+    assert result.changed is False
+    assert capture.calls == 0
+    assert debug["last_gate_skip_reason"] == "not_frontmost"
+    assert debug["last_capture_result"] == "skipped"
 
 
 @pytest.mark.asyncio
@@ -1051,6 +1125,7 @@ async def test_pipeline_exposes_last_vlm_error_in_debug_state() -> None:
     assert debug_state["last_error"] == "parse_failed"
     assert debug_state["last_vlm_parse_ok"] is False
     assert debug_state["last_vlm_roundtrip_ms"] == pytest.approx(5.0)
+    assert debug_state["last_capture_result"] == "captured_vlm_failed"
 
 
 @pytest.mark.asyncio

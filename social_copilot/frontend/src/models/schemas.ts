@@ -870,7 +870,10 @@ export const EverMemOSSettingsSchema = z.object({
   ownerUserId: z.string().min(1).default('self'),
   requestTimeoutMs: z.number().int().min(1000).max(60000).default(12000),
   backfillChunkSize: z.number().int().min(1).max(200).default(20),
+  backfillChunkTimeoutMs: z.number().int().min(1000).max(300000).default(60000),
   backfillChunkMessageBudgetSeconds: z.number().int().min(1).max(120).default(3),
+  backfillMaxRetryPerChunk: z.number().int().min(0).max(5).default(1),
+  backfillMinChunkSize: z.number().int().min(1).max(200).default(5),
   // LLM 配置
   llm: LLMConfigSchema.default({
     baseUrl: '',
@@ -958,7 +961,10 @@ export const AppSettingsSchema = z.object({
     ownerUserId: 'captain1307',
     requestTimeoutMs: 12000,
     backfillChunkSize: 20,
+    backfillChunkTimeoutMs: 60000,
     backfillChunkMessageBudgetSeconds: 3,
+    backfillMaxRetryPerChunk: 1,
+    backfillMinChunkSize: 5,
     deletedProfileSessionKeys: [],
     sessionBackfillProgress: {},
     availableAccounts: [
@@ -1037,7 +1043,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     ownerUserId: 'captain1307',
     requestTimeoutMs: 12000,
     backfillChunkSize: 20,
+    backfillChunkTimeoutMs: 60000,
     backfillChunkMessageBudgetSeconds: 3,
+    backfillMaxRetryPerChunk: 1,
+    backfillMinChunkSize: 5,
     llm: {
       baseUrl: '',
       apiKey: '',

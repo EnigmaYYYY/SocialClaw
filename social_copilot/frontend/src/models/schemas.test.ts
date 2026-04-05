@@ -119,13 +119,19 @@ describe('app settings schema', () => {
       evermemos: {
         ...DEFAULT_APP_SETTINGS.evermemos,
         backfillChunkSize: 20,
+        backfillChunkTimeoutMs: 65000,
         backfillChunkMessageBudgetSeconds: 3,
+        backfillMaxRetryPerChunk: 2,
+        backfillMinChunkSize: 4,
       },
     }
 
     const roundTripped = deserializeAppSettings(serializeAppSettings(settings))
 
     expect(roundTripped.evermemos.backfillChunkSize).toBe(20)
+    expect(roundTripped.evermemos.backfillChunkTimeoutMs).toBe(65000)
     expect(roundTripped.evermemos.backfillChunkMessageBudgetSeconds).toBe(3)
+    expect(roundTripped.evermemos.backfillMaxRetryPerChunk).toBe(2)
+    expect(roundTripped.evermemos.backfillMinChunkSize).toBe(4)
   })
 })

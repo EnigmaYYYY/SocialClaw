@@ -68,6 +68,10 @@ import {
   type ImportInitializeMemoryProgress
 } from './import-initialize-memory'
 import { resolveFrameCacheRunDirState } from './visual-monitor-cache-run'
+import {
+  cleanupLocalData,
+  type CleanupLocalDataResult
+} from './cleanup-local-data'
 import { listProviderModels, probeProviderConnection } from './model-provider'
 import { buildVisualMonitorConfigPatchPayload } from './visual-monitor-config-patch'
 import { createDipToScreenPointMapper, dipRectToScreenRect } from './coordinate-utils'
@@ -97,6 +101,9 @@ const CHAT_RECORD_REPAIR_COOLDOWN_MS = 60_000
 const PROFILE_CACHE_TTL_MS = 30_000
 const MEMORY_FILES_CACHE_TTL_MS = 30_000
 const DEFAULT_PROFILE_BACKFILL_CHUNK_SIZE = 20
+const DEFAULT_PROFILE_BACKFILL_MIN_CHUNK_SIZE = 5
+const DEFAULT_PROFILE_BACKFILL_CHUNK_TIMEOUT_MS = 60_000
+const DEFAULT_PROFILE_BACKFILL_MAX_RETRY_PER_CHUNK = 1
 
 let cachedUserProfile: { ownerUserId: string; profile: UnifiedProfile; fetchedAt: number } | null = null
 const cachedContactProfiles = new Map<string, { profile: UnifiedProfile | null; fetchedAt: number }>()
@@ -117,6 +124,7 @@ interface ProfileBackfillResult {
   updatedProfiles: number
   failedSessionNames: string[]
   failedReasons: string[]
+  boundaryMode: 'memcell'
 }
 
 interface ProfileBackfillJobState {
@@ -166,6 +174,10 @@ function createIdleBackfillJobState(): ProfileBackfillJobState {
 interface ClearProfilesResult {
   success: boolean
   cleared_profiles: number
+}
+
+interface CleanupLocalDataInput {
+  olderThanHours: number
 }
 
 interface EpisodicMemoryItem {
@@ -388,6 +400,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('memoryfiles:readItem', handleMemoryFilesReadItem)
   ipcMain.handle('memoryfiles:deleteItem', handleMemoryFilesDeleteItem)
   ipcMain.handle('memoryfiles:markSessionDirty', handleMemoryFilesMarkSessionDirty)
+
+  // Maintenance handlers (maintenance:*)
+  ipcMain.handle('maintenance:cleanupLocalData', handleMaintenanceCleanupLocalData)
 }
 
 /**
@@ -464,6 +479,7 @@ export function unregisterIpcHandlers(): void {
   ipcMain.removeHandler('memoryfiles:readItem')
   ipcMain.removeHandler('memoryfiles:deleteItem')
   ipcMain.removeHandler('memoryfiles:markSessionDirty')
+  ipcMain.removeHandler('maintenance:cleanupLocalData')
 
   // Stop hot run service if running
   if (hotRunService) {
@@ -806,9 +822,9 @@ async function handleImportInitializeMemory(
   const window = BrowserWindow.fromWebContents(event.sender)
 
   const dialogResult = await dialog.showOpenDialog(window!, {
-    title: '选择历史微信聊天导出目录',
+    title: 'Select Historical WeChat Export Folder',
     properties: ['openDirectory'],
-    message: '请选择联系人/群聊聊天记录文件夹'
+    message: 'Select the folder containing exported chat records.'
   })
 
   if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
@@ -835,11 +851,11 @@ async function handleSelectMemoryImportFilePath(
 ): Promise<string | null> {
   const window = BrowserWindow.fromWebContents(event.sender)
   const dialogResult = await dialog.showOpenDialog(window!, {
-    title: '选择历史聊天 CSV 或 SQLite 文件',
+    title: 'Select Historical Chat CSV or SQLite File',
     properties: ['openFile'],
     filters: [
-      { name: '聊天导出文件', extensions: ['csv', 'db', 'sqlite', 'sqlite3'] },
-      { name: '所有文件', extensions: ['*'] }
+      { name: 'Chat Export Files', extensions: ['csv', 'db', 'sqlite', 'sqlite3'] },
+      { name: 'All Files', extensions: ['*'] }
     ]
   })
 
@@ -855,7 +871,7 @@ async function handleSelectMemoryImportFolderPath(
 ): Promise<string | null> {
   const window = BrowserWindow.fromWebContents(event.sender)
   const dialogResult = await dialog.showOpenDialog(window!, {
-    title: '选择历史聊天导出目录',
+    title: 'Select Historical Chat Export Folder',
     properties: ['openDirectory']
   })
 
@@ -1156,7 +1172,7 @@ async function handleProfileAdminBackfillHistory(
 ): Promise<ProfileBackfillResult> {
   const settings = await memoryManager.loadSettings()
   const ownerUserId = settings.evermemos.ownerUserId
-  const backfillChunkSize = getProfileBackfillChunkSize(settings)
+  const backfillConfig = getProfileBackfillExecutionConfig(settings)
   await ensureStoredChatRecordsRepaired(settings)
   const allSessions = await loadStoredChatRecordSessions(
     settings.storagePaths.chatRecordsDir,
@@ -1180,7 +1196,8 @@ async function handleProfileAdminBackfillHistory(
     failedSessions: 0,
     updatedProfiles: 0,
     failedSessionNames: [],
-    failedReasons: []
+    failedReasons: [],
+    boundaryMode: 'memcell'
   }
 
   const updatedProgress: Record<string, string> = {}
@@ -1197,8 +1214,12 @@ async function handleProfileAdminBackfillHistory(
       deletedSessionKeys,
       sessionBackfillProgress
     }).filter((message) => shouldBackfillMessage(message))
-    return sum + chunkBackfillMessages(messages, backfillChunkSize).length
+    return sum + chunkBackfillMessages(messages, backfillConfig.chunkSize).length
   }, 0)
+
+  console.info(
+    `[profile-backfill] start: sessions=${sessions.length}, chunks=${pendingChunkCount}, forceFullRebuild=${forceFullRebuild}, chunkSize=${backfillConfig.chunkSize}, minChunkSize=${backfillConfig.minChunkSize}, maxRetryPerChunk=${backfillConfig.maxRetryPerChunk}, chunkTimeoutMs=${backfillConfig.chunkTimeoutMs}, boundaryMode=${result.boundaryMode}`
+  )
 
   activeProfileBackfillJobState = {
     active: true,
@@ -1225,6 +1246,9 @@ async function handleProfileAdminBackfillHistory(
     }).filter((message) => shouldBackfillMessage(message))
 
     if (messages.length === 0) {
+      console.info(
+        `[profile-backfill] skip session: sessionKey=${session.sessionKey}, sessionName=${session.sessionName}, reason=no_messages`
+      )
       result.skippedSessions += 1
       activeProfileBackfillJobState = {
         ...activeProfileBackfillJobState,
@@ -1236,69 +1260,114 @@ async function handleProfileAdminBackfillHistory(
     }
 
     const displayName = deriveBackfillDisplayName(session, messages)
-    const chunks = chunkBackfillMessages(messages, backfillChunkSize)
+    const plannedChunks = chunkBackfillMessages(messages, backfillConfig.chunkSize).length
     let sessionUpdatedProfile = false
+    let adaptiveChunkSize = backfillConfig.chunkSize
+    let cursor = 0
+    let transportChunkIndex = 0
+    console.info(
+      `[profile-backfill] session start: sessionKey=${session.sessionKey}, sessionName=${session.sessionName}, displayName=${displayName}, messages=${messages.length}, plannedChunks=${plannedChunks}, initialChunkSize=${adaptiveChunkSize}`
+    )
 
     try {
-      try {
-        await resetEverMemOSConversationRuntimeState(settings, session.sessionKey)
-      } catch (resetError) {
-        console.warn(
-          `[profile-backfill] failed to reset runtime state for ${session.sessionKey}:`,
-          resetError
-        )
-      }
-
-      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-        const chunk = chunks[chunkIndex]
+      sessionChunkLoop: while (cursor < messages.length) {
+        const chunk = messages.slice(cursor, cursor + adaptiveChunkSize)
         const outboundMessages = chunk.map((message) => sanitizeBackfillMessage(message))
-        const isFinalChunk = chunkIndex === chunks.length - 1
         const chunkTimeoutMs = computeBackfillChunkTimeoutMs(
-          settings.evermemos.requestTimeoutMs,
+          backfillConfig.chunkTimeoutMs,
           outboundMessages.length,
           settings.evermemos.backfillChunkMessageBudgetSeconds
         )
+        transportChunkIndex += 1
+        const chunkLabel = `${transportChunkIndex}/${Math.max(activeProfileBackfillJobState.totalChunks, transportChunkIndex)}`
         let response: {
           success?: boolean
           is_new_friend?: boolean
           profile_updated?: boolean
           contact_profile?: UnifiedProfile | null
-        }
-        try {
-          response = await fetchEverMemOSJson<{
-            success?: boolean
-            is_new_friend?: boolean
-            profile_updated?: boolean
-            contact_profile?: UnifiedProfile | null
-          }>(
-            settings,
-            '/api/v1/copilot/process-chat',
-            {
-              method: 'POST',
-              body: JSON.stringify({
-                owner_user_id: settings.evermemos.ownerUserId,
-                session_key: session.sessionKey,
-                display_name: displayName,
-                messages: outboundMessages,
-                incoming_message: null,
-                force_profile_update: isFinalChunk,
-                force_memory_backfill: true,
-                is_historical_import: true
-              })
-            },
-            chunkTimeoutMs
+        } | null = null
+        let attempt = 0
+
+        while (attempt <= backfillConfig.maxRetryPerChunk) {
+          console.info(
+            `[profile-backfill] chunk start: sessionKey=${session.sessionKey}, transport_chunk_index=${chunkLabel}, messages=${outboundMessages.length}, timeoutMs=${chunkTimeoutMs}, attempt=${attempt + 1}/${backfillConfig.maxRetryPerChunk + 1}, boundaryMode=${result.boundaryMode}`
           )
-        } catch (error) {
-          const rawMessage = error instanceof Error ? error.message : String(error)
-          const isAbortError =
-            (error instanceof Error && error.name === 'AbortError') ||
-            rawMessage.toLowerCase().includes('aborted')
-          const detail = isAbortError
-            ? `chunk ${chunkIndex + 1}/${chunks.length} (${outboundMessages.length} 条) 超时，中止于 ${Math.round(chunkTimeoutMs / 1000)}s`
-            : `chunk ${chunkIndex + 1}/${chunks.length} (${outboundMessages.length} 条) 失败: ${rawMessage}`
-          throw new Error(detail)
+          try {
+            response = await fetchEverMemOSJson<{
+              success?: boolean
+              is_new_friend?: boolean
+              profile_updated?: boolean
+              contact_profile?: UnifiedProfile | null
+            }>(
+              settings,
+              '/api/v1/copilot/process-chat',
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  owner_user_id: settings.evermemos.ownerUserId,
+                  session_key: session.sessionKey,
+                  display_name: displayName,
+                  messages: outboundMessages,
+                  force_profile_update: false
+                })
+              },
+              chunkTimeoutMs
+            )
+            break
+          } catch (error) {
+            const rawMessage = error instanceof Error ? error.message : String(error)
+            const normalizedMessage = rawMessage.toLowerCase()
+            const isAbortError =
+              (error instanceof Error && error.name === 'AbortError') ||
+              normalizedMessage.includes('aborted')
+            const retryable = isRetryableBackfillError(rawMessage, isAbortError)
+            const canRetry = retryable && attempt < backfillConfig.maxRetryPerChunk
+
+            if (canRetry) {
+              attempt += 1
+              console.warn(
+                `[profile-backfill] chunk retry: sessionKey=${session.sessionKey}, transport_chunk_index=${chunkLabel}, attempt=${attempt + 1}/${backfillConfig.maxRetryPerChunk + 1}, reason=${rawMessage}`
+              )
+              continue
+            }
+
+            if (isAbortError && adaptiveChunkSize > backfillConfig.minChunkSize) {
+              const oldChunkSize = adaptiveChunkSize
+              adaptiveChunkSize = Math.max(backfillConfig.minChunkSize, Math.floor(adaptiveChunkSize / 2))
+              if (adaptiveChunkSize < oldChunkSize) {
+                const remainingMessages = messages.length - cursor
+                const oldRemainingChunks = Math.ceil(remainingMessages / oldChunkSize)
+                const newRemainingChunks = Math.ceil(remainingMessages / adaptiveChunkSize)
+                const extraChunks = Math.max(0, newRemainingChunks - oldRemainingChunks)
+                if (extraChunks > 0) {
+                  activeProfileBackfillJobState = {
+                    ...activeProfileBackfillJobState,
+                    totalChunks: activeProfileBackfillJobState.totalChunks + extraChunks,
+                    updatedAt: new Date().toISOString()
+                  }
+                }
+                console.warn(
+                  `[profile-backfill] chunk timeout degrade: sessionKey=${session.sessionKey}, transport_chunk_index=${chunkLabel}, chunkSize=${oldChunkSize}->${adaptiveChunkSize}, timeoutMs=${chunkTimeoutMs}, remainingMessages=${remainingMessages}, extraChunks=${extraChunks}`
+                )
+                transportChunkIndex -= 1
+                continue sessionChunkLoop
+              }
+            }
+
+            const detail = isAbortError
+              ? `chunk ${chunkLabel} (${outboundMessages.length} messages) timed out after ${Math.round(chunkTimeoutMs / 1000)}s (chunkSize=${adaptiveChunkSize}, maxRetry=${backfillConfig.maxRetryPerChunk})`
+              : `chunk ${chunkLabel} (${outboundMessages.length} messages) failed: ${rawMessage} (chunkSize=${adaptiveChunkSize}, maxRetry=${backfillConfig.maxRetryPerChunk})`
+            throw new Error(detail)
+          }
         }
-        if (isFinalChunk && (response.is_new_friend || response.profile_updated || response.contact_profile)) {
+
+        if (!response) {
+          throw new Error(`chunk ${chunkLabel} produced no response`)
+        }
+        console.info(
+          `[profile-backfill] chunk done: sessionKey=${session.sessionKey}, transport_chunk_index=${chunkLabel}, success=${response.success !== false}, memcell_boundary_output=${response.success !== false ? 'accepted' : 'rejected'}, profile_updated=${Boolean(response.profile_updated)}, is_new_friend=${Boolean(response.is_new_friend)}, boundaryMode=${result.boundaryMode}`
+        )
+        if (response.is_new_friend || response.profile_updated || response.contact_profile) {
           sessionUpdatedProfile = true
         }
         if (normalizedSessionKey) {
@@ -1324,12 +1393,16 @@ async function handleProfileAdminBackfillHistory(
           completedChunks: activeProfileBackfillJobState.completedChunks + 1,
           updatedAt: new Date().toISOString()
         }
+        cursor += chunk.length
       }
 
       result.processedSessions += 1
       if (sessionUpdatedProfile) {
         result.updatedProfiles += 1
       }
+      console.info(
+        `[profile-backfill] session done: sessionKey=${session.sessionKey}, sessionName=${session.sessionName}, updatedProfile=${sessionUpdatedProfile}`
+      )
       if (normalizedSessionKey) {
         const latestTimestamp = messages
           .map((m) => m.timestamp)
@@ -1350,6 +1423,9 @@ async function handleProfileAdminBackfillHistory(
       result.failedSessions += 1
       result.failedSessionNames.push(session.sessionName)
       const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(
+        `[profile-backfill] session failed: sessionKey=${session.sessionKey}, sessionName=${session.sessionName}, error=${errorMessage}`
+      )
       if (result.failedReasons.length < 5) {
         result.failedReasons.push(`${session.sessionName}: ${errorMessage}`)
       }
@@ -1370,6 +1446,10 @@ async function handleProfileAdminBackfillHistory(
     }
     await memoryManager.saveSettings(settings)
   }
+
+  console.info(
+    `[profile-backfill] complete: scanned=${result.scannedSessions}, processed=${result.processedSessions}, skipped=${result.skippedSessions}, failed=${result.failedSessions}, updatedProfiles=${result.updatedProfiles}, boundaryMode=${result.boundaryMode}`
+  )
 
   activeProfileBackfillJobState = {
     ...activeProfileBackfillJobState,
@@ -1631,9 +1711,9 @@ async function handleColdStartExecute(
 
   // Open folder picker dialog
   const dialogResult = await dialog.showOpenDialog(window!, {
-    title: '选择聊天数据文件夹',
+    title: 'Select Chat Data Folder',
     properties: ['openDirectory'],
-    message: '请选择联系人/群聊聊天记录文件夹'
+    message: 'Select the folder containing contact/group chat records.'
   })
 
   if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
@@ -1643,7 +1723,7 @@ async function handleColdStartExecute(
       contactProfiles: new Map(),
       messageCount: 0,
       contactCount: 0,
-      errors: ['用户取消了文件夹选择']
+      errors: ['鐢ㄦ埛鍙栨秷浜嗘枃浠跺す閫夋嫨']
     }
   }
 
@@ -1942,6 +2022,34 @@ async function handleMemoryFilesMarkSessionDirty(
   }
 }
 
+async function handleMaintenanceCleanupLocalData(
+  _event: Electron.IpcMainInvokeEvent,
+  input: CleanupLocalDataInput
+): Promise<CleanupLocalDataResult> {
+  const rawOlderThanHours = input?.olderThanHours
+  const olderThanHours = Number.isFinite(rawOlderThanHours) ? Math.floor(rawOlderThanHours) : NaN
+  if (!Number.isFinite(olderThanHours) || olderThanHours < 1) {
+    throw new Error('olderThanHours must be a positive integer')
+  }
+
+  const settings = await memoryManager.loadSettings()
+  const cutoffDate = new Date(Date.now() - olderThanHours * 60 * 60 * 1000)
+  const result = await cleanupLocalData({
+    chatRecordsDir: settings.storagePaths.chatRecordsDir,
+    cacheDir: settings.storagePaths.cacheDir,
+    ownerUserId: settings.evermemos.ownerUserId,
+    cutoffIso: cutoffDate.toISOString(),
+    activeCacheRunDir: latestFrameCacheRunDir
+  })
+
+  cachedMemorySections = null
+  dirtyMemorySessions.clear()
+  dirtySessionKeys.clear()
+  lastChatRecordRepairAt = 0
+
+  return result
+}
+
 async function ensureStorageDirectories(settings: AppSettings): Promise<void> {
   const paths = [
     settings.storagePaths.rootDir,
@@ -1958,7 +2066,7 @@ async function ensureStorageDirectories(settings: AppSettings): Promise<void> {
       await mkdir(dirPath, { recursive: true })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      throw new Error(`无法创建存储目录: ${dirPath} (${reason})`)
+      throw new Error(`鏃犳硶鍒涘缓瀛樺偍鐩綍: ${dirPath} (${reason})`)
     }
   }
 }
@@ -1995,6 +2103,57 @@ function getProfileBackfillChunkSize(settings: AppSettings): number {
     return DEFAULT_PROFILE_BACKFILL_CHUNK_SIZE
   }
   return Math.max(1, Math.min(200, Math.floor(rawValue)))
+}
+
+interface ProfileBackfillExecutionConfig {
+  chunkSize: number
+  minChunkSize: number
+  maxRetryPerChunk: number
+  chunkTimeoutMs: number
+}
+
+function getProfileBackfillExecutionConfig(settings: AppSettings): ProfileBackfillExecutionConfig {
+  const chunkSize = getProfileBackfillChunkSize(settings)
+  const rawMinChunkSize = settings.evermemos.backfillMinChunkSize
+  const minChunkSize = Number.isFinite(rawMinChunkSize)
+    ? Math.max(1, Math.min(chunkSize, Math.floor(rawMinChunkSize)))
+    : Math.min(chunkSize, DEFAULT_PROFILE_BACKFILL_MIN_CHUNK_SIZE)
+  const rawChunkTimeoutMs = settings.evermemos.backfillChunkTimeoutMs
+  const chunkTimeoutMs = Number.isFinite(rawChunkTimeoutMs)
+    ? Math.max(1_000, Math.min(300_000, Math.floor(rawChunkTimeoutMs)))
+    : DEFAULT_PROFILE_BACKFILL_CHUNK_TIMEOUT_MS
+  const rawMaxRetryPerChunk = settings.evermemos.backfillMaxRetryPerChunk
+  const maxRetryPerChunk = Number.isFinite(rawMaxRetryPerChunk)
+    ? Math.max(0, Math.min(5, Math.floor(rawMaxRetryPerChunk)))
+    : DEFAULT_PROFILE_BACKFILL_MAX_RETRY_PER_CHUNK
+
+  return {
+    chunkSize,
+    minChunkSize,
+    maxRetryPerChunk,
+    chunkTimeoutMs
+  }
+}
+
+function isRetryableBackfillError(rawMessage: string, isAbortError: boolean): boolean {
+  if (isAbortError) {
+    return true
+  }
+  const normalized = rawMessage.toLowerCase()
+  return (
+    normalized.includes('fetch failed') ||
+    normalized.includes('networkerror') ||
+    normalized.includes('network error') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('etimedout') ||
+    normalized.includes('timeout') ||
+    normalized.includes('temporarily unavailable') ||
+    normalized.includes('429') ||
+    normalized.includes('502') ||
+    normalized.includes('503') ||
+    normalized.includes('504')
+  )
 }
 
 async function syncSettingsToVisualMonitorBackend(settings: AppSettings): Promise<void> {
@@ -2037,12 +2196,12 @@ async function syncSettingsToVisualMonitorBackend(settings: AppSettings): Promis
 
     if (!response.ok) {
       const body = await response.text()
-      throw new Error(`服务返回 ${response.status}: ${body}`)
+      throw new Error(`Service returned ${response.status}: ${body}`)
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `设置已保存，但同步视觉监测后端失败（${baseUrl}）。请先启动后端：${VISUAL_MONITOR_START_COMMAND}。原始错误: ${reason}`
+      `Settings were saved, but syncing visual monitor backend failed (${baseUrl}). Start backend first: ${VISUAL_MONITOR_START_COMMAND}. Original error: ${reason}`
     )
   }
 }
@@ -2074,12 +2233,12 @@ async function syncSettingsToEverMemOSBackend(settings: AppSettings): Promise<vo
 
     if (!response.ok) {
       const body = await response.text()
-      throw new Error(`服务返回 ${response.status}: ${body}`)
+      throw new Error(`Service returned ${response.status}: ${body}`)
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `设置已保存，但同步 EverMemOS LLM 配置失败（${baseUrl}）。原始错误: ${reason}`
+      `Settings were saved, but syncing EverMemOS LLM config failed (${baseUrl}). Original error: ${reason}`
     )
   }
 }
@@ -2139,25 +2298,6 @@ async function fetchEverMemOSJson<T>(
   } finally {
     clearTimeout(timeoutId)
   }
-}
-
-async function resetEverMemOSConversationRuntimeState(
-  settings: AppSettings,
-  sessionKey: string,
-  clearCache = false
-): Promise<void> {
-  await fetchEverMemOSJson(
-    settings,
-    '/api/v1/copilot/conversation-runtime/reset',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        session_key: sessionKey,
-        clear_cache: clearCache
-      })
-    },
-    Math.max(settings.evermemos.requestTimeoutMs || 15000, 5000)
-  )
 }
 
 function shouldBackfillMessage(message: ChatRecordEntry): boolean {

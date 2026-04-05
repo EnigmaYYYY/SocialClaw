@@ -71,6 +71,7 @@ def test_monitor_config_defaults_to_adaptive_strategy() -> None:
     assert cfg.monitor.frame_cache.enabled is False
     assert cfg.monitor.frame_cache.testing_mode is False
     assert cfg.monitor.window_gate.enabled is False
+    assert cfg.monitor.window_gate.app_aliases == ["WeChat", "微信", "WeChatAppEx", "Weixin"]
     assert cfg.monitor.vlm_async.enabled is True
     assert cfg.monitor.privacy.debug_dump_dir.endswith("social_copilot_debug_frames")
 
@@ -104,3 +105,17 @@ def test_monitor_config_maps_legacy_window_gate_auto_roi_ratios() -> None:
     assert cfg.monitor.roi_strategy.auto.coarse_top_ratio == pytest.approx(0.15)
     assert cfg.monitor.roi_strategy.auto.coarse_width_ratio == pytest.approx(0.70)
     assert cfg.monitor.roi_strategy.auto.coarse_height_ratio == pytest.approx(0.72)
+
+
+def test_monitor_config_allows_overriding_window_gate_app_aliases() -> None:
+    cfg = MonitorConfig.model_validate(
+        {
+            "monitor": {
+                "window_gate": {
+                    "app_name": "WeChat",
+                    "app_aliases": ["WeChat", "CustomWeChat"],
+                }
+            }
+        }
+    )
+    assert cfg.monitor.window_gate.app_aliases == ["WeChat", "CustomWeChat"]

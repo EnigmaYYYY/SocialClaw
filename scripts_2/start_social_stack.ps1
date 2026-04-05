@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RootDir = "",
   [string]$VisualMonitorPython = "D:\conda_envs\emos2\python.exe",
   [string]$EverMemOSPython = "D:\conda_envs\emos2\python.exe",
