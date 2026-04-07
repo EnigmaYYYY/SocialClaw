@@ -528,6 +528,23 @@ export interface SettingsAPI {
   testConnection: (baseUrl: string, apiKey?: string, model?: string) => Promise<string>
 
   /**
+   * Tests vision model connectivity AND sends a fixed test image to verify VLM image parsing
+   * @param baseUrl - Provider base URL
+   * @param apiKey - Provider API key
+   * @param model - Model ID
+   * @param maxTokens - Max tokens for VLM call
+   * @param disableThinking - Whether to disable model thinking/reasoning
+   * @returns Result message; throws if image parsing fails
+   */
+  testVisionConnection: (
+    baseUrl: string,
+    apiKey?: string,
+    model?: string,
+    maxTokens?: number,
+    disableThinking?: boolean
+  ) => Promise<string>
+
+  /**
    * Marks onboarding as complete
    * Sets the onboardingComplete flag in settings
    */
@@ -1076,6 +1093,15 @@ const settingsAPI: SettingsAPI = {
 
   testConnection: (baseUrl: string, apiKey: string = '', model: string = ''): Promise<string> =>
     ipcRenderer.invoke('settings:testConnection', baseUrl, apiKey, model),
+
+  testVisionConnection: (
+    baseUrl: string,
+    apiKey: string = '',
+    model: string = '',
+    maxTokens: number = 2000,
+    disableThinking: boolean = true
+  ): Promise<string> =>
+    ipcRenderer.invoke('settings:testVisionConnection', baseUrl, apiKey, model, maxTokens, disableThinking),
 
   completeOnboarding: (): Promise<void> =>
     ipcRenderer.invoke('settings:completeOnboarding')

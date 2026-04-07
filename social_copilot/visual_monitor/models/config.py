@@ -82,13 +82,14 @@ class VisionLiteLLMConfig(BaseModel):
         )
     )
     api_key_env: str = "SOCIAL_COPILOT_VLM_API_KEY"
-    timeout_ms: int = Field(default_factory=lambda: _env_int("SOCIAL_COPILOT_VLM_TIMEOUT_MS", 30000), ge=500)
-    max_tokens: int = Field(default_factory=lambda: _env_int("SOCIAL_COPILOT_VLM_MAX_TOKENS", 800), ge=32)
+    timeout_ms: int = Field(default_factory=lambda: _env_int("SOCIAL_COPILOT_VLM_TIMEOUT_MS", 120000), ge=500)
+    max_tokens: int = Field(default_factory=lambda: _env_int("SOCIAL_COPILOT_VLM_MAX_TOKENS", 2000), ge=32)
     temperature: float = Field(
         default_factory=lambda: _env_float("SOCIAL_COPILOT_VLM_TEMPERATURE", 0.0),
         ge=0.0,
         le=2.0,
     )
+    disable_thinking: bool = Field(default_factory=lambda: _env_bool("SOCIAL_COPILOT_VLM_DISABLE_THINKING", True))
 
 
 class VisionIncrementalConfig(BaseModel):

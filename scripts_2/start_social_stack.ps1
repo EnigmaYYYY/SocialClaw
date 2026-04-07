@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$RootDir = "",
   [string]$VisualMonitorPython = "D:\conda_envs\emos2\python.exe",
   [string]$EverMemOSPython = "D:\conda_envs\emos2\python.exe",
@@ -58,8 +58,12 @@ function Start-BackgroundProcess {
     try {
       $existingPid = [int](Get-Content $PidPath -Raw)
       $null = Get-Process -Id $existingPid -ErrorAction Stop
-      Stop-Process -Id $existingPid -Force -ErrorAction Stop
-      Write-Host "$Name old PID $existingPid stopped before restart."
+      $killOut = & taskkill /PID $existingPid /T /F 2>&1
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host "$Name old PID $existingPid stopped before restart (taskkill /T /F)."
+      } else {
+        Write-Host "$Name old PID $existingPid stop failed: $($killOut -join '; ')"
+      }
       Start-Sleep -Milliseconds 300
     } catch {
       Write-Host "$Name old PID not running or invalid, continuing."
@@ -130,6 +134,9 @@ function Wait-HttpReady {
 
   throw "$Name did not become ready at $Url within ${DependencyTimeoutSec}s."
 }
+
+Write-Host "[0/4] Cleaning residual processes before startup..."
+& (Join-Path $PSScriptRoot "stop_social_stack.ps1") -RootDir $RootDir -SkipDocker
 
 if ($SkipDocker) {
   Write-Host "[1/4] Skipping EverMemOS Docker dependencies startup..."

@@ -1611,7 +1611,6 @@ export function ProfileLibraryPanel({
                       <div>
                         <div className="profile-sticky-name">
                           {draft.display_name || '未命名画像'}
-                          <small>{formatProfileType(draft.profile_type)}</small>
                         </div>
                         <div className="profile-sticky-sub">
                           {draft.conversation_id || draft.target_user_id || draft.owner_user_id}

@@ -368,6 +368,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('settings:save', handleSaveSettings)
   ipcMain.handle('settings:listModels', handleListModels)
   ipcMain.handle('settings:testConnection', handleTestConnection)
+  ipcMain.handle('settings:testVisionConnection', handleTestVisionConnection)
   ipcMain.handle('settings:completeOnboarding', handleCompleteOnboarding)
 
   // Contacts handlers
@@ -1071,6 +1072,7 @@ async function handleProfileAdminSave(
   if (!response.data) {
     throw new Error('evermemos_profile_save_failed')
   }
+  invalidateProfileCaches(response.data.owner_user_id ?? settings.evermemos.ownerUserId)
   return normalizeSelfProfileDisplayName(response.data, settings.evermemos.ownerUserId)
 }
 
@@ -1633,6 +1635,57 @@ async function handleTestConnection(
   model: string = ''
 ): Promise<string> {
   return probeProviderConnection(fetch as typeof globalThis.fetch, baseUrl, apiKey, model)
+}
+
+async function handleTestVisionConnection(
+  _event: Electron.IpcMainInvokeEvent,
+  baseUrl: string,
+  apiKey: string = '',
+  model: string = '',
+  maxTokens: number = 2000,
+  disableThinking: boolean = true
+): Promise<string> {
+  // Step 1: basic connectivity + text smoke test (original behavior)
+  const basicResult = await probeProviderConnection(fetch as typeof globalThis.fetch, baseUrl, apiKey, model)
+
+  // Step 2: VLM image test via Python backend
+  const settings = await memoryManager.loadSettings()
+  const backendBaseUrl =
+    (settings.visualMonitor as { apiBaseUrl?: string }).apiBaseUrl?.trim() ||
+    DEFAULT_VISUAL_MONITOR_API_BASE_URL
+
+  let vlmResult: { ok: boolean; parse_ok: boolean; message_count: number; roundtrip_ms: number; error: string }
+  try {
+    const resp = await (fetch as typeof globalThis.fetch)(`${backendBaseUrl}/monitor/test-vlm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_url: baseUrl,
+        api_key: apiKey,
+        model,
+        max_tokens: maxTokens,
+        disable_thinking: disableThinking,
+        timeout_ms: 60000
+      })
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      return `${basicResult}（VLM图像测试跳过: 后端返回 ${resp.status}${text ? ': ' + text.slice(0, 100) : ''}）`
+    }
+    vlmResult = (await resp.json()) as typeof vlmResult
+  } catch (exc) {
+    const errMsg = exc instanceof Error ? exc.message : String(exc)
+    return `${basicResult}（VLM图像测试跳过: ${errMsg.slice(0, 100)}）`
+  }
+
+  if (!vlmResult.ok) {
+    const detail = vlmResult.error
+      ? vlmResult.error.slice(0, 120)
+      : '模型未返回可解析的结构化结果'
+    throw new Error(`连接成功，但VLM图像解析失败: ${detail}`)
+  }
+
+  return `${basicResult}；图像解析通过（${vlmResult.message_count}条消息，${vlmResult.roundtrip_ms.toFixed(0)}ms）`
 }
 
 /**

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import shutil
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator, Callable
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from social_copilot.visual_monitor.adapters.capture_mss import MSSCaptureAdapter
 from social_copilot.visual_monitor.adapters.vision_litellm_structured import (
@@ -26,6 +30,20 @@ from social_copilot.visual_monitor.models.config import MonitorConfig
 from social_copilot.visual_monitor.models.events import MessageEvent
 from social_copilot.visual_monitor.observability.metrics import MonitorMetrics
 from social_copilot.visual_monitor.security.debug_storage import DebugFrameStorage
+
+
+def _cleanup_old_cache_dirs(current_cache_dir: str) -> None:
+    """Delete all monitor_frames_* sibling dirs except the current one."""
+    try:
+        current = Path(current_cache_dir).resolve()
+        parent = current.parent
+        for entry in parent.iterdir():
+            if entry == current:
+                continue
+            if entry.is_dir() and entry.name.startswith("monitor_frames_"):
+                shutil.rmtree(entry, ignore_errors=True)
+    except Exception:
+        pass  # cleanup is best-effort, never block pipeline startup
 
 
 def _load_project_env() -> None:
@@ -171,8 +189,9 @@ class VisualMonitorService:
         merged = self.config.model_dump()
         _deep_update(merged, patch)
         self.config = MonitorConfig.model_validate(merged)
-        if self._running:
-            await self.stop()
+        was_running = self._running
+        if was_running:
+            await self.close()
             await self.start()
         return self.config
 
@@ -280,6 +299,7 @@ class VisualMonitorService:
                 timeout_ms=cfg.timeout_ms,
                 max_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
+                disable_thinking=cfg.disable_thinking,
             )
         )
         if older_png is not None:
@@ -319,6 +339,7 @@ class VisualMonitorService:
             raise
         except Exception as exc:  # pragma: no cover - safety net
             self._last_error = str(exc)
+            logger.error("Monitor loop crashed: %s", exc, exc_info=True)
         finally:
             if self._pipeline is not None:
                 await self._pipeline.shutdown()
@@ -326,6 +347,7 @@ class VisualMonitorService:
 
     def _build_pipeline(self, event_bus: EventBus, metrics: MonitorMetrics) -> VisualMonitorPipeline:
         _load_project_env()
+        _cleanup_old_cache_dirs(self.config.monitor.frame_cache.cache_dir)
         vlm_structured_adapter = None
         vlm_cfg = self.config.monitor.vision.litellm
         if vlm_cfg.enabled or self.config.monitor.vision.mode == "vlm_structured":
@@ -338,6 +360,7 @@ class VisualMonitorService:
                     timeout_ms=vlm_cfg.timeout_ms,
                     max_tokens=vlm_cfg.max_tokens,
                     temperature=vlm_cfg.temperature,
+                    disable_thinking=vlm_cfg.disable_thinking,
                 )
             )
         scheduler = CaptureScheduler(

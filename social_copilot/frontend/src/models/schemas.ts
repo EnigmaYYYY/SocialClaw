@@ -754,7 +754,9 @@ export const ModelProviderSettingsSchema = z.object({
   baseUrl: z.string().min(1),
   apiKey: z.string(),
   modelName: z.string().min(1),
-  requestTimeoutMs: z.number().int().min(1000).max(120000).default(30000)
+  requestTimeoutMs: z.number().int().min(1000).max(120000).default(30000),
+  maxTokens: z.number().int().min(64).max(32768).default(2000),
+  disableThinking: z.boolean().default(true)
 })
 export type ModelProviderSettings = z.infer<typeof ModelProviderSettingsSchema>
 
@@ -920,13 +922,17 @@ export const AppSettingsSchema = z.object({
       baseUrl: 'https://litellm.sii.sh.cn/v1',
       apiKey: '',
       modelName: 'sii-dsv3.1',
-      requestTimeoutMs: 30000
+      requestTimeoutMs: 30000,
+      maxTokens: 2000,
+      disableThinking: true
     },
     vision: {
       baseUrl: 'https://litellm.sii.sh.cn/v1',
       apiKey: '',
       modelName: 'sii-Qwen3-VL-235B-A22B-Instruct',
-      requestTimeoutMs: 30000
+      requestTimeoutMs: 30000,
+      maxTokens: 2000,
+      disableThinking: true
     }
   }),
   visualMonitor: VisualMonitorSettingsSchema.default({
@@ -1002,13 +1008,17 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       baseUrl: 'https://litellm.sii.sh.cn/v1',
       apiKey: '',
       modelName: 'sii-dsv3.1',
-      requestTimeoutMs: 30000
+      requestTimeoutMs: 30000,
+      maxTokens: 2000,
+      disableThinking: true
     },
     vision: {
       baseUrl: 'https://litellm.sii.sh.cn/v1',
       apiKey: '',
       modelName: 'sii-Qwen3-VL-235B-A22B-Instruct',
-      requestTimeoutMs: 30000
+      requestTimeoutMs: 30000,
+      maxTokens: 2000,
+      disableThinking: true
     }
   },
   visualMonitor: {
@@ -1194,9 +1204,31 @@ export function serializeAppSettings(settings: AppSettings): string {
   return JSON.stringify(settings)
 }
 
+function deepMerge(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base }
+  for (const key of Object.keys(override)) {
+    const baseVal = base[key]
+    const overVal = override[key]
+    if (
+      overVal !== null &&
+      typeof overVal === 'object' &&
+      !Array.isArray(overVal) &&
+      baseVal !== null &&
+      typeof baseVal === 'object' &&
+      !Array.isArray(baseVal)
+    ) {
+      result[key] = deepMerge(baseVal as Record<string, unknown>, overVal as Record<string, unknown>)
+    } else {
+      result[key] = overVal
+    }
+  }
+  return result
+}
+
 export function deserializeAppSettings(json: string): AppSettings {
   const parsed = JSON.parse(json)
-  return AppSettingsSchema.parse(parsed)
+  const merged = deepMerge(DEFAULT_APP_SETTINGS as unknown as Record<string, unknown>, parsed as Record<string, unknown>)
+  return AppSettingsSchema.parse(merged)
 }
 
 // ============================================================================

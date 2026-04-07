@@ -186,7 +186,9 @@ export function buildVisualMonitorConfigPatchPayload(options: {
           enabled: true,
           base_url: visionProvider.baseUrl,
           model: visionProvider.modelName,
-          api_key: visionProvider.apiKey
+          api_key: visionProvider.apiKey,
+          max_tokens: visionProvider.maxTokens,
+          disable_thinking: visionProvider.disableThinking
         }
       },
       frame_cache: {

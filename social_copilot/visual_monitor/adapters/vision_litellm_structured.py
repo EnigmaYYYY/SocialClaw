@@ -90,6 +90,7 @@ class LiteLLMStructuredVisionConfig:
     timeout_ms: int = 8000
     max_tokens: int = 800
     temperature: float = 0.0
+    disable_thinking: bool = True
 
 
 @dataclass(slots=True)
@@ -205,7 +206,16 @@ class LiteLLMStructuredVisionAdapter:
             image_base64 = base64.b64encode(image_png).decode("ascii")
             content_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}})
 
-        payload = {
+        # When disable_thinking is True, inject the thinking=disabled budget token
+        # and force temperature=1 as required by reasoning models in non-thinking mode.
+        if self._config.disable_thinking:
+            effective_temperature = 1.0
+            thinking_extra: dict[str, object] = {"thinking": {"type": "disabled"}}
+        else:
+            effective_temperature = self._config.temperature
+            thinking_extra = {}
+
+        payload: dict[str, object] = {
             "model": self._config.model,
             "messages": [
                 {
@@ -213,9 +223,10 @@ class LiteLLMStructuredVisionAdapter:
                     "content": content_blocks,
                 }
             ],
-            "temperature": self._config.temperature,
+            "temperature": effective_temperature,
             "max_tokens": self._config.max_tokens,
             "stream": False,
+            **thinking_extra,
         }
         url = f"{self._config.base_url.rstrip('/')}/chat/completions"
         started = perf_counter()
@@ -376,6 +387,7 @@ class LiteLLMStructuredVisionAdapter:
                 "timestamp_utc": datetime.now(tz=timezone.utc).isoformat(),
                 "model": self._config.model,
                 "base_url": self._config.base_url,
+                "disable_thinking": self._config.disable_thinking,
                 "prompt": prompt,
                 "image_count": len(images_png),
                 "image_sizes": [len(item) for item in images_png],
@@ -403,7 +415,7 @@ class LiteLLMStructuredVisionAdapter:
 
     @staticmethod
     def _log_dir() -> Path:
-        return Path(__file__).resolve().parents[2] / "log"
+        return Path(__file__).resolve().parents[3] / "logs" / "vlm"
 
 
 def _extract_content_from_chat_completion(raw: str) -> str:
@@ -422,8 +434,18 @@ def _extract_content_from_chat_completion(raw: str) -> str:
         for item in content:
             if isinstance(item, dict) and item.get("type") == "text":
                 chunks.append(str(item.get("text", "")))
-        return "\n".join(chunks).strip()
-    return str(content).strip()
+        content = "\n".join(chunks).strip()
+    else:
+        content = str(content).strip()
+
+    # Some reasoning model proxies (e.g. kr777.top) ignore thinking=disabled and
+    # return an empty content with the actual answer buried in reasoning_content.
+    # Fall back to reasoning_content when content is empty.
+    if not content:
+        reasoning = message.get("reasoning_content", "") or ""
+        content = str(reasoning).strip()
+
+    return content
 
 
 def _compact_error_body(raw: str) -> str:

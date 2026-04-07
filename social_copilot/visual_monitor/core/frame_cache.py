@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import re
 import shutil
@@ -75,7 +76,16 @@ class FrameCacheManager:
                     return None
 
         path = target_dir / f"{self._compose_file_stem(frame_id, sanitized_token)}{suffix}"
-        path.write_bytes(image)
+        try:
+            path.write_bytes(image)
+        except OSError as exc:
+            _is_disk_full = exc.errno == errno.ENOSPC or getattr(exc, "winerror", None) == 112
+            if _is_disk_full:
+                raise OSError(
+                    f"[DiskFull] No space left on device — cannot write frame cache to {path}. "
+                    "Free up disk space and restart the monitor."
+                ) from exc
+            raise
         entry = FrameCacheEntry(frame_id=frame_id, path=path, filename_token=sanitized_token)
 
         if should_track_kept_png:
