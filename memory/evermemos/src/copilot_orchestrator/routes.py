@@ -25,6 +25,32 @@ from core.observation.logger import get_logger
 router = APIRouter(prefix="/api/v1/copilot", tags=["copilot"])
 logger = get_logger(__name__)
 
+MANUAL_EVIDENCE_PREFIX = "manual:"
+MANUAL_REASONING_TEXT = "用户手动设置"
+SINGLE_PROFILE_FIELD_KEYS = (
+    "gender",
+    "age",
+    "education_level",
+    "intimacy_level",
+)
+LIST_PROFILE_FIELD_KEYS = (
+    "occupation",
+    "relationship",
+    "traits",
+    "personality",
+    "interests",
+    "way_of_decision_making",
+    "life_habit_preference",
+    "communication_style",
+    "catchphrase",
+    "user_to_friend_catchphrase",
+    "user_to_friend_chat_style",
+    "motivation_system",
+    "fear_system",
+    "value_system",
+    "humor_use",
+)
+
 
 def _get_profile_repo():
     from core.di import get_bean
@@ -448,7 +474,74 @@ def _normalize_profile_payload(payload: Dict[str, Any]) -> UnifiedProfile:
     else:
         profile_data["profile_type"] = ProfileType.CONTACT.value
 
+    profile_data = _enforce_manual_profile_rules(profile_data)
     return UnifiedProfile.from_dict(profile_data)
+
+
+def _normalize_evidence_item(evidence: Any) -> Optional[Dict[str, str]]:
+    if isinstance(evidence, str):
+        event_id = evidence.strip()
+        if not event_id:
+            return None
+        return {"event_id": event_id, "reasoning": ""}
+
+    if isinstance(evidence, dict):
+        event_id = str(evidence.get("event_id", "")).strip()
+        if not event_id:
+            return None
+        reasoning = str(evidence.get("reasoning", "")).strip()
+        return {"event_id": event_id, "reasoning": reasoning}
+
+    return None
+
+
+def _normalize_profile_field_with_manual_rule(field_value: Any) -> Any:
+    if not isinstance(field_value, dict):
+        return field_value
+
+    value = str(field_value.get("value", "")).strip()
+    if not value:
+        return field_value
+
+    evidences_raw = field_value.get("evidences", [])
+    if not isinstance(evidences_raw, list):
+        evidences_raw = [evidences_raw]
+
+    normalized_evidences: List[Dict[str, str]] = []
+    has_manual_evidence = False
+
+    for raw_item in evidences_raw:
+        normalized_item = _normalize_evidence_item(raw_item)
+        if not normalized_item:
+            continue
+        if normalized_item["event_id"].startswith(MANUAL_EVIDENCE_PREFIX):
+            has_manual_evidence = True
+            normalized_item["reasoning"] = MANUAL_REASONING_TEXT
+        normalized_evidences.append(normalized_item)
+
+    patched = dict(field_value)
+    patched["evidences"] = normalized_evidences
+
+    if has_manual_evidence:
+        patched["evidence_level"] = "L1"
+
+    return patched
+
+
+def _enforce_manual_profile_rules(profile_data: Dict[str, Any]) -> Dict[str, Any]:
+    patched = dict(profile_data)
+
+    for key in SINGLE_PROFILE_FIELD_KEYS:
+        if key in patched and patched[key] is not None:
+            patched[key] = _normalize_profile_field_with_manual_rule(patched[key])
+
+    for key in LIST_PROFILE_FIELD_KEYS:
+        raw_list = patched.get(key)
+        if not isinstance(raw_list, list):
+            continue
+        patched[key] = [_normalize_profile_field_with_manual_rule(item) for item in raw_list]
+
+    return patched
 
 
 def _normalize_process_chat_message(
@@ -1466,33 +1559,48 @@ async def get_llm_config() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _update_env_config(request: Dict[str, Any], config_mapping: Dict[str, str], config_label: str) -> Dict[str, Any]:
+    """共享的 .env 配置更新逻辑"""
+    env_path = _get_env_file_path()
+
+    env_lines = []
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            env_lines = f.readlines()
+
+    updated_keys = set()
+    for i, line in enumerate(env_lines):
+        stripped = line.strip()
+        for config_key, env_key in config_mapping.items():
+            if stripped.startswith(f"{env_key}="):
+                new_value = request.get(config_key)
+                if new_value is not None:
+                    if config_key == "api_key" and not new_value:
+                        continue
+                    env_lines[i] = f"{env_key}={new_value}\n"
+                    os.environ[env_key] = str(new_value)
+                    updated_keys.add(env_key)
+
+    for config_key, env_key in config_mapping.items():
+        if env_key not in updated_keys:
+            new_value = request.get(config_key)
+            if new_value is not None:
+                if config_key == "api_key" and not new_value:
+                    continue
+                env_lines.append(f"{env_key}={new_value}\n")
+                os.environ[env_key] = str(new_value)
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(env_lines)
+
+    logger.info(f"[Config] {config_label} config updated: {list(updated_keys)}")
+    return {"success": True, "message": "配置已更新，重启服务后生效"}
+
+
 @router.put("/config/llm")
 async def update_llm_config(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    更新 LLM 配置到 .env 文件
-
-    Args:
-        request: {
-            "base_url": "https://api.openai.com/v1",
-            "api_key": "sk-xxx",  # 可选，不传则保持原值
-            "model": "gpt-4",
-            "temperature": 0.3,
-            "max_tokens": 8192
-        }
-
-    Returns:
-        {"success": True, "message": "配置已更新"}
-    """
+    """更新 LLM 配置到 .env 文件"""
     try:
-        env_path = _get_env_file_path()
-
-        # 读取现有 .env 文件
-        env_lines = []
-        if env_path.exists():
-            with open(env_path, "r", encoding="utf-8") as f:
-                env_lines = f.readlines()
-
-        # 需要更新的配置项
         config_mapping = {
             "base_url": "LLM_BASE_URL",
             "api_key": "LLM_API_KEY",
@@ -1500,45 +1608,85 @@ async def update_llm_config(request: Dict[str, Any]) -> Dict[str, Any]:
             "temperature": "LLM_TEMPERATURE",
             "max_tokens": "LLM_MAX_TOKENS"
         }
-
-        # 更新环境变量和 .env 文件
-        updated_keys = set()
-        for i, line in enumerate(env_lines):
-            stripped = line.strip()
-            for config_key, env_key in config_mapping.items():
-                if stripped.startswith(f"{env_key}="):
-                    new_value = request.get(config_key)
-                    if new_value is not None:
-                        # 如果是 api_key 且值为空或未传，保持原值
-                        if config_key == "api_key" and not new_value:
-                            continue
-                        env_lines[i] = f"{env_key}={new_value}\n"
-                        os.environ[env_key] = str(new_value)
-                        updated_keys.add(env_key)
-
-        # 添加未存在的配置项
-        for config_key, env_key in config_mapping.items():
-            if env_key not in updated_keys:
-                new_value = request.get(config_key)
-                if new_value is not None:
-                    if config_key == "api_key" and not new_value:
-                        continue
-                    env_lines.append(f"{env_key}={new_value}\n")
-                    os.environ[env_key] = str(new_value)
-
-        # 写回 .env 文件
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(env_lines)
-
-        logger.info(f"[Config] LLM config updated: {list(updated_keys)}")
-
-        return {
-            "success": True,
-            "message": "配置已更新，重启服务后生效"
-        }
-
+        return _update_env_config(request, config_mapping, "LLM")
     except Exception as exc:
         logger.error(f"[Config] Failed to update LLM config: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================================
+# Vectorize Configuration API
+# ============================================================================
+
+@router.get("/config/vectorize")
+async def get_vectorize_config() -> Dict[str, Any]:
+    """获取向量化配置"""
+    try:
+        api_key = os.getenv("VECTORIZE_API_KEY", "")
+        return {
+            "success": True,
+            "config": {
+                "base_url": os.getenv("VECTORIZE_BASE_URL", ""),
+                "api_key": _mask_api_key(api_key),
+                "api_key_full": api_key,
+                "model": os.getenv("VECTORIZE_MODEL", "Qwen/Qwen3-Embedding-4B")
+            }
+        }
+    except Exception as exc:
+        logger.error(f"[Config] Failed to get Vectorize config: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/config/vectorize")
+async def update_vectorize_config(request: Dict[str, Any]) -> Dict[str, Any]:
+    """更新向量化配置到 .env 文件"""
+    try:
+        config_mapping = {
+            "base_url": "VECTORIZE_BASE_URL",
+            "api_key": "VECTORIZE_API_KEY",
+            "model": "VECTORIZE_MODEL"
+        }
+        return _update_env_config(request, config_mapping, "Vectorize")
+    except Exception as exc:
+        logger.error(f"[Config] Failed to update Vectorize config: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ============================================================================
+# Rerank Configuration API
+# ============================================================================
+
+@router.get("/config/rerank")
+async def get_rerank_config() -> Dict[str, Any]:
+    """获取重排序配置"""
+    try:
+        api_key = os.getenv("RERANK_API_KEY", "")
+        return {
+            "success": True,
+            "config": {
+                "base_url": os.getenv("RERANK_BASE_URL", ""),
+                "api_key": _mask_api_key(api_key),
+                "api_key_full": api_key,
+                "model": os.getenv("RERANK_MODEL", "Qwen/Qwen3-Reranker-4B")
+            }
+        }
+    except Exception as exc:
+        logger.error(f"[Config] Failed to get Rerank config: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/config/rerank")
+async def update_rerank_config(request: Dict[str, Any]) -> Dict[str, Any]:
+    """更新重排序配置到 .env 文件"""
+    try:
+        config_mapping = {
+            "base_url": "RERANK_BASE_URL",
+            "api_key": "RERANK_API_KEY",
+            "model": "RERANK_MODEL"
+        }
+        return _update_env_config(request, config_mapping, "Rerank")
+    except Exception as exc:
+        logger.error(f"[Config] Failed to update Rerank config: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 

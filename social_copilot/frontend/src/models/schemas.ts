@@ -190,7 +190,15 @@ export type UnifiedEvidence = z.infer<typeof UnifiedEvidenceSchema>
 export const ProfileFieldSchema = z.object({
   value: z.string(),
   evidence_level: z.enum(['L1', 'L2', 'L3']).default('L2'),
-  evidences: z.array(z.string()).default([])
+  evidences: z.array(
+    z.union([
+      z.string(),
+      z.object({
+        event_id: z.string().optional(),
+        reasoning: z.string().optional()
+      })
+    ])
+  ).default([])
 })
 export type ProfileField = z.infer<typeof ProfileFieldSchema>
 
@@ -866,6 +874,20 @@ export const LLMConfigSchema = z.object({
 })
 export type LLMConfig = z.infer<typeof LLMConfigSchema>
 
+export const VectorizeConfigSchema = z.object({
+  baseUrl: z.string().default(''),
+  apiKey: z.string().default(''),
+  model: z.string().default('Qwen/Qwen3-Embedding-4B')
+})
+export type VectorizeConfig = z.infer<typeof VectorizeConfigSchema>
+
+export const RerankConfigSchema = z.object({
+  baseUrl: z.string().default(''),
+  apiKey: z.string().default(''),
+  model: z.string().default('Qwen/Qwen3-Reranker-4B')
+})
+export type RerankConfig = z.infer<typeof RerankConfigSchema>
+
 export const EverMemOSSettingsSchema = z.object({
   enabled: z.boolean().default(true),
   apiBaseUrl: z.string().min(1).default('http://127.0.0.1:1995'),
@@ -883,6 +905,18 @@ export const EverMemOSSettingsSchema = z.object({
     model: 'gpt-4',
     temperature: 0.3,
     maxTokens: 8192
+  }),
+  // 向量化配置
+  vectorize: VectorizeConfigSchema.default({
+    baseUrl: '',
+    apiKey: '',
+    model: 'Qwen/Qwen3-Embedding-4B'
+  }),
+  // 重排序配置
+  rerank: RerankConfigSchema.default({
+    baseUrl: '',
+    apiKey: '',
+    model: 'Qwen/Qwen3-Reranker-4B'
   }),
   // Blacklist of session keys for deleted profiles (prevent auto-recreation)
   deletedProfileSessionKeys: z.array(z.string()).default([]),
@@ -976,7 +1010,17 @@ export const AppSettingsSchema = z.object({
     availableAccounts: [
       { userId: 'captain1307', displayName: 'Me' },
       { userId: '🌟', displayName: '🌟' }
-    ]
+    ],
+    vectorize: {
+      baseUrl: '',
+      apiKey: '',
+      model: 'Qwen/Qwen3-Embedding-4B'
+    },
+    rerank: {
+      baseUrl: '',
+      apiKey: '',
+      model: 'Qwen/Qwen3-Reranker-4B'
+    }
   }),
   storagePaths: StoragePathsSchema.default({
     rootDir: './social_copilot',
@@ -1063,6 +1107,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       model: 'gpt-4',
       temperature: 0.3,
       maxTokens: 8192
+    },
+    vectorize: {
+      baseUrl: '',
+      apiKey: '',
+      model: 'Qwen/Qwen3-Embedding-4B'
+    },
+    rerank: {
+      baseUrl: '',
+      apiKey: '',
+      model: 'Qwen/Qwen3-Reranker-4B'
     },
     deletedProfileSessionKeys: [],
     sessionBackfillProgress: {},

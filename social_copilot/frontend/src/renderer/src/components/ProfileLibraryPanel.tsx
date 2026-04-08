@@ -41,6 +41,32 @@ type ListFieldKey =
   | 'value_system'
   | 'humor_use'
 
+const MANUAL_EVIDENCE_PREFIX = 'manual:'
+const MANUAL_REASONING_TEXT = '用户手动设置'
+const SINGLE_PROFILE_FIELD_KEYS = [
+  'gender',
+  'age',
+  'education_level',
+  'intimacy_level'
+] as const
+const LIST_PROFILE_FIELD_KEYS: ListFieldKey[] = [
+  'occupation',
+  'relationship',
+  'traits',
+  'personality',
+  'interests',
+  'way_of_decision_making',
+  'life_habit_preference',
+  'communication_style',
+  'catchphrase',
+  'user_to_friend_catchphrase',
+  'user_to_friend_chat_style',
+  'motivation_system',
+  'fear_system',
+  'value_system',
+  'humor_use'
+]
+
 type EpisodicMemoryItem = Awaited<
   ReturnType<typeof window.electronAPI.profileAdmin.listEpisodes>
 >[number]
@@ -313,6 +339,23 @@ function normalizeProfileFieldList(fields: unknown): ProfileField[] {
     .filter((item): item is ProfileField => Boolean(item))
 }
 
+function normalizeSingleProfileField(field: unknown): ProfileField | null {
+  if (!field) return null
+  if (typeof field === 'string') {
+    const value = field.trim()
+    return value ? { value, evidence_level: 'L2', evidences: [] } : null
+  }
+  if (typeof field !== 'object' || !('value' in field)) return null
+  const rawValue = (field as { value?: unknown }).value
+  const value = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue ?? '').trim()
+  if (!value) return null
+  const rawLevel = (field as { evidence_level?: unknown }).evidence_level
+  const level: EvidenceLevel = rawLevel === 'L1' || rawLevel === 'L2' || rawLevel === 'L3' ? rawLevel : 'L2'
+  const evidencesRaw = (field as { evidences?: unknown }).evidences
+  const evidences = Array.isArray(evidencesRaw) ? evidencesRaw : []
+  return { value, evidence_level: level, evidences }
+}
+
 function normalizeEvidenceEntries(
   evidences: Array<string | { event_id?: string; reasoning?: string }>
 ): Array<{ event_id: string; reasoning: string }> {
@@ -328,6 +371,81 @@ function normalizeEvidenceEntries(
       return eventId ? { event_id: eventId, reasoning } : null
     })
     .filter((item): item is { event_id: string; reasoning: string } => Boolean(item))
+}
+
+function withManualEvidence(
+  field: ProfileField,
+  fieldKey: string,
+  uniqueSuffix: string
+): ProfileField {
+  const normalizedEvidences = normalizeEvidenceEntries(field.evidences ?? [])
+  let hasManualEvidence = false
+  const patchedEvidences = normalizedEvidences.map((item) => {
+    if (item.event_id.startsWith(MANUAL_EVIDENCE_PREFIX)) {
+      hasManualEvidence = true
+      return { event_id: item.event_id, reasoning: MANUAL_REASONING_TEXT }
+    }
+    return item
+  })
+  if (!hasManualEvidence) {
+    patchedEvidences.push({
+      event_id: `${MANUAL_EVIDENCE_PREFIX}${fieldKey}:${uniqueSuffix}`,
+      reasoning: MANUAL_REASONING_TEXT
+    })
+  }
+  return {
+    ...field,
+    evidence_level: 'L1',
+    evidences: patchedEvidences
+  }
+}
+
+function applyManualEditsToProfileFields(
+  draft: UnifiedProfile,
+  baseline: UnifiedProfile | null
+): UnifiedProfile {
+  const next = deepClone(draft)
+  const nowToken = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+  for (const key of SINGLE_PROFILE_FIELD_KEYS) {
+    const currentField = normalizeSingleProfileField((next as Record<string, unknown>)[key])
+    const baselineField = normalizeSingleProfileField(
+      baseline ? (baseline as Record<string, unknown>)[key] : null
+    )
+    if (!currentField) {
+      ;(next as Record<string, unknown>)[key] = null
+      continue
+    }
+    const changed = !baselineField || baselineField.value !== currentField.value
+    ;(next as Record<string, unknown>)[key] = changed
+      ? withManualEvidence(currentField, key, `${nowToken}:single`)
+      : currentField
+  }
+
+  for (const key of LIST_PROFILE_FIELD_KEYS) {
+    const currentList = normalizeProfileFieldList((next as Record<string, unknown>)[key])
+    const baselineList = normalizeProfileFieldList(
+      baseline ? (baseline as Record<string, unknown>)[key] : null
+    )
+    const baselineValueCounts = new Map<string, number>()
+    for (const item of baselineList) {
+      const value = item.value.trim()
+      baselineValueCounts.set(value, (baselineValueCounts.get(value) ?? 0) + 1)
+    }
+
+    const patched = currentList.map((item, index) => {
+      const value = item.value.trim()
+      const remaining = baselineValueCounts.get(value) ?? 0
+      if (remaining > 0) {
+        baselineValueCounts.set(value, remaining - 1)
+        return item
+      }
+      return withManualEvidence(item, key, `${nowToken}:list:${index}`)
+    })
+    ;(next as Record<string, unknown>)[key] = patched
+  }
+
+  return next
 }
 
 function levelClass(level?: string): string {
@@ -1202,8 +1320,10 @@ export function ProfileLibraryPanel({
     setSaving(true)
     setError(null)
     try {
+      const baselineProfile = profiles.find((profile) => profile.profile_id === draft.profile_id) ?? null
+      const normalizedForSave = applyManualEditsToProfileFields(draft, baselineProfile)
       const saved = normalizeProfileDisplayName(
-        await window.electronAPI.profileAdmin.save(toPersistedProfile(deepClone(draft)))
+        await window.electronAPI.profileAdmin.save(toPersistedProfile(normalizedForSave))
       )
       setProfiles((current) => {
         const filtered = current.filter(

@@ -5,6 +5,7 @@ type MemorySectionId = Awaited<ReturnType<typeof window.electronAPI.memoryFiles.
 type MemoryFileSection = Awaited<ReturnType<typeof window.electronAPI.memoryFiles.getSection>>
 type MemoryFileDetail = Awaited<ReturnType<typeof window.electronAPI.memoryFiles.readItem>>
 type MemoryFileListItem = MemoryFileSection['items'][number]
+type ChatBubble = NonNullable<MemoryFileDetail['bubbles']>[number]
 
 interface MemoryLibraryPanelProps {
   sectionId: MemorySectionId
@@ -275,55 +276,56 @@ function FileMemoryLibraryPanel({
 
   return (
     <div className="memory-library-shell">
-      <section className="console-card memory-section-summary">
-        <div className="memory-section-head">
-          <div>
-            <h3>{section?.title ?? '记忆文件'}</h3>
-            <p>{section?.description ?? '浏览最近收录的聊天、线索和摘要文件。'}</p>
-          </div>
-          <div className="memory-section-actions">
-            <label className="memory-search-field">
-              <span>搜索联系人</span>
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="搜索联系人、会话名、标签"
-              />
-            </label>
-            <button type="button" className="memory-refresh-btn" onClick={() => void onRefresh()}>
-              刷新列表
-            </button>
-            <button type="button" className="memory-refresh-btn" onClick={toggleSelectionMode}>
-              {selectionMode ? '取消多选' : '批量选择'}
-            </button>
-            {selectionMode && (
-              <button
-                type="button"
-                className="memory-refresh-btn danger"
-                onClick={() => void handleBatchDelete()}
-                disabled={selectedPaths.length === 0 || deletingPaths.length > 0}
-              >
-                {`删除选中 (${selectedPaths.length})`}
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
       <section className="console-card memory-browser-card">
-        {loading && <p>正在加载记忆文件...</p>}
+        {loading && <p style={{ padding: '16px' }}>正在加载记忆文件...</p>}
         {!loading && error && (
-          <p>
+          <p style={{ padding: '16px' }}>
             记忆文件加载失败: <span>{error}</span>
           </p>
         )}
-        {!loading && !error && section && filteredItems.length === 0 && (
-          <p>{searchQuery.trim() ? '没有匹配当前搜索条件的记录。' : '当前栏目还没有可展示的记录。'}</p>
-        )}
-        {!loading && !error && section && filteredItems.length > 0 && (
+        {!loading && !error && section && (
           <div className="memory-browser-layout">
+            {/* ── 左侧列表 ── */}
             <div className="memory-item-list" role="list" aria-label={`${section.title}列表`}>
+              {/* 列表顶部 header */}
+              <div className="chat-list-header">
+                <div className="chat-list-header-row">
+                  <span className="chat-list-section-title">{section.title}</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" className="memory-refresh-btn" onClick={() => void onRefresh()}>
+                      刷新
+                    </button>
+                    <button type="button" className="memory-refresh-btn" onClick={toggleSelectionMode}>
+                      {selectionMode ? '取消' : '批量选择'}
+                    </button>
+                  </div>
+                </div>
+                <label className="chat-search-field">
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="搜索联系人、会话名、标签"
+                  />
+                </label>
+                {selectionMode && selectedPaths.length > 0 && (
+                  <button
+                    type="button"
+                    className="memory-refresh-btn danger"
+                    onClick={() => void handleBatchDelete()}
+                    disabled={deletingPaths.length > 0}
+                  >
+                    {`删除选中 (${selectedPaths.length})`}
+                  </button>
+                )}
+              </div>
+
+              {filteredItems.length === 0 ? (
+                <p style={{ margin: '8px 14px', color: '#71717a', fontSize: 13 }}>
+                  {searchQuery.trim() ? '没有匹配的记录。' : '当前栏目还没有可展示的记录。'}
+                </p>
+              ) : null}
+
               {filteredItems.map((item) => (
                 <button
                   key={item.id}
@@ -336,9 +338,7 @@ function FileMemoryLibraryPanel({
                     setSelectedPath(item.path)
                   }}
                   onMouseDown={(event) => {
-                    if (event.button !== 2) {
-                      return
-                    }
+                    if (event.button !== 2) return
                     event.preventDefault()
                     openContextMenu(event, item)
                   }}
@@ -362,57 +362,60 @@ function FileMemoryLibraryPanel({
                     </label>
                   )}
                   <div className="memory-item-title-row">
-                    <strong>
-                      {item.title}
-                      {item.titleMeta ? <small>{item.titleMeta}</small> : null}
-                    </strong>
+                    <strong>{item.title}</strong>
                     <div className="memory-item-head-actions">
                       <span>{formatTimestamp(item.updatedAt)}</span>
                     </div>
                   </div>
-                  <p>{item.summary}</p>
-                  <div className="memory-item-meta">
-                    <span>{item.sizeLabel}</span>
-                    {deletingPaths.includes(item.path) ? <span>删除中...</span> : null}
-                  </div>
                   <div className="memory-tag-row">
-                    {item.tags
-                      .filter((tag) => !['chat', '微信'].includes(tag))
-                      .slice(0, 4)
-                      .map((tag) => (
-                      <em key={`${item.id}-${tag}`}>{tag}</em>
-                    ))}
+                    {item.summary ? <em>{item.summary}</em> : null}
+                    {item.titleMeta ? <em>{item.titleMeta}</em> : null}
+                    <em>{item.sizeLabel}</em>
+                    {deletingPaths.includes(item.path) ? <em>删除中...</em> : null}
                   </div>
                 </button>
               ))}
             </div>
 
+            {/* ── 右侧详情 ── */}
             <div className="memory-detail-panel">
               {!detail && <p>请选择一条记录查看详情。</p>}
               {detail && (
                 <>
-                  <div className="memory-detail-header">
-                    <div>
-                      <h3>
-                        {detail.title}
-                        {detail.titleMeta ? <small>{detail.titleMeta}</small> : null}
-                      </h3>
+                  <div className="chat-detail-header">
+                    <div className="chat-detail-header-left">
+                      <span className="chat-detail-title">{detail.title}</span>
+                      <span className="chat-detail-meta">
+                        {[detail.titleMeta, detail.sizeLabel, formatTimestamp(detail.updatedAt)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
                     </div>
-                    <div className="memory-detail-stats">
-                      <span>{formatTimestamp(detail.updatedAt)}</span>
-                      <span>{detail.sizeLabel}</span>
+                    <div className="chat-detail-header-actions">
+                      <button type="button" className="memory-refresh-btn" onClick={() => void onRefresh()}>
+                        刷新
+                      </button>
+                      {(() => {
+                        const listItem = filteredItems.find((item) => item.path === detail.path)
+                        return listItem ? (
+                          <button
+                            type="button"
+                            className="memory-refresh-btn danger"
+                            onClick={() => void handleDelete(listItem)}
+                          >
+                            删除
+                          </button>
+                        ) : null
+                      })()}
                     </div>
                   </div>
-                  <div className="memory-tag-row">
-                    {detail.tags
-                      .filter((tag) => !['chat', '微信'].includes(tag))
-                      .map((tag) => (
-                      <em key={`${detail.path}-${tag}`}>{tag}</em>
-                    ))}
-                  </div>
-                  <pre className="memory-detail-content">
-                    {detailLoading ? '正在读取详情...' : detail.content}
-                  </pre>
+                  {detailLoading ? (
+                    <p style={{ color: '#71717a', fontSize: 13 }}>正在读取详情...</p>
+                  ) : detail.bubbles && detail.bubbles.length > 0 ? (
+                    <ChatBubbleList bubbles={detail.bubbles} />
+                  ) : (
+                    <pre className="memory-detail-content">{detail.content}</pre>
+                  )}
                 </>
               )}
             </div>
@@ -423,10 +426,7 @@ function FileMemoryLibraryPanel({
       {menu && (
         <div
           className="memory-context-menu"
-          style={{
-            left: `${menu.x}px`,
-            top: `${menu.y}px`
-          }}
+          style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
         >
           <button
             type="button"
@@ -452,4 +452,55 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit'
   }).format(date)
+}
+
+function formatBubbleTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
+function ChatBubbleList({ bubbles }: { bubbles: ChatBubble[] }): JSX.Element {
+  const items: JSX.Element[] = []
+  let lastTs: number | null = null
+  let lastSender = ''
+
+  for (let i = 0; i < bubbles.length; i++) {
+    const bubble = bubbles[i]
+    if (!bubble) continue
+    const tsMs = bubble.timestamp ? new Date(bubble.timestamp).getTime() : null
+
+    // Time divider: show when gap >= 5 minutes or at start
+    if (tsMs && !Number.isNaN(tsMs)) {
+      if (lastTs === null || tsMs - lastTs >= 5 * 60 * 1000) {
+        items.push(
+          <div key={`divider-${i}`} className="chat-time-divider">
+            {formatBubbleTime(bubble.timestamp!)}
+          </div>
+        )
+      }
+      lastTs = tsMs
+    }
+
+    const isMe = bubble.sender === 'user'
+    const sameGroup = bubble.name === lastSender
+    lastSender = bubble.name
+
+    items.push(
+      <div
+        key={i}
+        className={`chat-bubble ${isMe ? 'chat-bubble-me' : 'chat-bubble-other'}${sameGroup ? ' chat-bubble-grouped' : ''}`}
+      >
+        <div className={`chat-bubble-avatar${isMe ? ' chat-bubble-avatar-me' : ''}${sameGroup ? ' hidden' : ''}`}>
+          {bubble.name.slice(0, 1)}
+        </div>
+        <div className="chat-bubble-body">
+          {!sameGroup && !isMe ? <span className="chat-bubble-name">{bubble.name}</span> : null}
+          <div className="chat-bubble-text">{bubble.text}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return <div className="chat-bubble-list">{items}</div>
 }

@@ -7,8 +7,8 @@ type MemorySectionOverview = Awaited<ReturnType<typeof window.electronAPI.memory
 type ModelProviderKey = keyof AppSettings['modelProviders']
 type ModelProviderSettings = AppSettings['modelProviders'][ModelProviderKey]
 
-type ProviderConnectionKey = 'Assistant' | '视觉模型' | 'EverMemOS' | 'EverMemOS 模型'
-type ProviderFeedbackKey = 'assistant' | 'vision' | 'evermemos'
+type ProviderConnectionKey = 'Assistant' | '视觉模型' | 'EverMemOS' | 'EverMemOS 模型' | 'EverMemOS Vectorize' | 'EverMemOS Vectorize 模型' | 'EverMemOS Rerank' | 'EverMemOS Rerank 模型'
+type ProviderFeedbackKey = 'assistant' | 'vision' | 'evermemos' | 'evermemosVectorize' | 'evermemosRerank'
 type ProviderFeedbackTone = 'info' | 'success' | 'error'
 type ProviderFeedbackState = {
   message: string
@@ -915,22 +915,6 @@ export function MainConsoleApp(): JSX.Element {
                   }
                 />
               </div>
-              <div className="settings-row">
-                <label htmlFor="vision-disable-thinking">{'关闭模型推理（Thinking）'}</label>
-                <select
-                  id="vision-disable-thinking"
-                  value={settings.modelProviders.vision.disableThinking ? 'true' : 'false'}
-                  onChange={(event) =>
-                    updateModelProvider('vision', (previous) => ({
-                      ...previous,
-                      disableThinking: event.target.value === 'true'
-                    }))
-                  }
-                >
-                  <option value="true">{'关闭（推荐，直接输出 JSON）'}</option>
-                  <option value="false">{'开启（推理模型深度思考）'}</option>
-                </select>
-              </div>
               <p className="settings-tip">
                 若目标服务不支持列模型，可直接手动输入模型名，再点"测试连接"走实际调用探测。
               </p>
@@ -1162,6 +1146,256 @@ export function MainConsoleApp(): JSX.Element {
                 {providerFeedback.evermemos && (
                   <div className={`settings-feedback settings-feedback-${providerFeedback.evermemos.tone}`}>
                     {providerFeedback.evermemos.message}
+                  </div>
+                )}
+              </div>
+              <div className="settings-row">
+                <label htmlFor="evermemos-vectorize-base-url">Vectorize 地址</label>
+                <input
+                  id="evermemos-vectorize-base-url"
+                  type="text"
+                  value={settings.evermemos.vectorize.baseUrl}
+                  onChange={(event) =>
+                    updateSettings((previous) => ({
+                      ...previous,
+                      evermemos: {
+                        ...previous.evermemos,
+                        vectorize: {
+                          ...previous.evermemos.vectorize,
+                          baseUrl: event.target.value
+                        }
+                      }
+                    }))
+                  }
+                />
+              </div>
+              <div className="settings-row">
+                <label htmlFor="evermemos-vectorize-api-key">Vectorize API Key</label>
+                <input
+                  id="evermemos-vectorize-api-key"
+                  type="password"
+                  value={settings.evermemos.vectorize.apiKey}
+                  onChange={(event) =>
+                    updateSettings((previous) => ({
+                      ...previous,
+                      evermemos: {
+                        ...previous.evermemos,
+                        vectorize: {
+                          ...previous.evermemos.vectorize,
+                          apiKey: event.target.value
+                        }
+                      }
+                    }))
+                  }
+                />
+              </div>
+              <div className="settings-row settings-row-model-select">
+                <label htmlFor="evermemos-vectorize-model">Vectorize 模型</label>
+                <div className="settings-model-select-group">
+                  <input
+                    id="evermemos-vectorize-model"
+                    type="text"
+                    list="evermemos-vectorize-model-options"
+                    value={settings.evermemos.vectorize.model}
+                    onChange={(event) =>
+                      updateSettings((previous) => ({
+                        ...previous,
+                        evermemos: {
+                          ...previous.evermemos,
+                          vectorize: {
+                            ...previous.evermemos.vectorize,
+                            model: event.target.value
+                          }
+                        }
+                      }))
+                    }
+                    placeholder="可手动输入模型名"
+                  />
+                  <datalist id="evermemos-vectorize-model-options">
+                    {Array.from(new Set([...modelLists.assistant, ...modelLists.vision])).map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    className="settings-inline-btn"
+                    onClick={async () => {
+                      const baseUrl = settings.evermemos.vectorize.baseUrl.trim()
+                      if (!baseUrl) {
+                        updateProviderFeedback('evermemosVectorize', 'Vectorize 地址不能为空', 'error')
+                        return
+                      }
+                      setProviderConnectionTesting((previous) => ({ ...previous, 'EverMemOS Vectorize': true }))
+                      try {
+                        const models = await window.electronAPI.settings.listModels(baseUrl, settings.evermemos.vectorize.apiKey)
+                        setModelLists((previous) => ({ ...previous, assistant: Array.from(new Set([...previous.assistant, ...models])) }))
+                        if (models.length > 0 && !models.includes(settings.evermemos.vectorize.model)) {
+                          updateSettings((previous) => ({
+                            ...previous,
+                            evermemos: {
+                              ...previous.evermemos,
+                              vectorize: {
+                                ...previous.evermemos.vectorize,
+                                model: models[0]
+                              }
+                            }
+                          }))
+                        }
+                        updateProviderFeedback(
+                          'evermemosVectorize',
+                          models.length > 0 ? `已拉取 ${models.length} 个 Vectorize 模型` : 'Vectorize 模型列表为空',
+                          models.length > 0 ? 'success' : 'info'
+                        )
+                      } catch (error) {
+                        const message = error instanceof Error ? error.message : '模型列表拉取失败'
+                        updateProviderFeedback('evermemosVectorize', `Vectorize 模型列表拉取失败: ${message}`, 'error')
+                      } finally {
+                        setProviderConnectionTesting((previous) => ({ ...previous, 'EverMemOS Vectorize': false }))
+                      }
+                    }}
+                    disabled={providerConnectionTesting['EverMemOS Vectorize'] === true}
+                  >
+                    {providerConnectionTesting['EverMemOS Vectorize'] ? '拉取中...' : '拉取模型'}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-inline-btn"
+                    onClick={() => void testProviderConnection('evermemosVectorize', 'EverMemOS Vectorize 模型', settings.evermemos.vectorize.baseUrl, settings.evermemos.vectorize.apiKey, settings.evermemos.vectorize.model)}
+                    disabled={providerConnectionTesting['EverMemOS Vectorize 模型'] === true}
+                  >
+                    {providerConnectionTesting['EverMemOS Vectorize 模型'] ? '测试中...' : '测试连接'}
+                  </button>
+                </div>
+                {providerFeedback.evermemosVectorize && (
+                  <div className={`settings-feedback settings-feedback-${providerFeedback.evermemosVectorize.tone}`}>
+                    {providerFeedback.evermemosVectorize.message}
+                  </div>
+                )}
+              </div>
+              <div className="settings-row">
+                <label htmlFor="evermemos-rerank-base-url">Rerank 地址</label>
+                <input
+                  id="evermemos-rerank-base-url"
+                  type="text"
+                  value={settings.evermemos.rerank.baseUrl}
+                  onChange={(event) =>
+                    updateSettings((previous) => ({
+                      ...previous,
+                      evermemos: {
+                        ...previous.evermemos,
+                        rerank: {
+                          ...previous.evermemos.rerank,
+                          baseUrl: event.target.value
+                        }
+                      }
+                    }))
+                  }
+                />
+              </div>
+              <div className="settings-row">
+                <label htmlFor="evermemos-rerank-api-key">Rerank API Key</label>
+                <input
+                  id="evermemos-rerank-api-key"
+                  type="password"
+                  value={settings.evermemos.rerank.apiKey}
+                  onChange={(event) =>
+                    updateSettings((previous) => ({
+                      ...previous,
+                      evermemos: {
+                        ...previous.evermemos,
+                        rerank: {
+                          ...previous.evermemos.rerank,
+                          apiKey: event.target.value
+                        }
+                      }
+                    }))
+                  }
+                />
+              </div>
+              <div className="settings-row settings-row-model-select">
+                <label htmlFor="evermemos-rerank-model">Rerank 模型</label>
+                <div className="settings-model-select-group">
+                  <input
+                    id="evermemos-rerank-model"
+                    type="text"
+                    list="evermemos-rerank-model-options"
+                    value={settings.evermemos.rerank.model}
+                    onChange={(event) =>
+                      updateSettings((previous) => ({
+                        ...previous,
+                        evermemos: {
+                          ...previous.evermemos,
+                          rerank: {
+                            ...previous.evermemos.rerank,
+                            model: event.target.value
+                          }
+                        }
+                      }))
+                    }
+                    placeholder="可手动输入模型名"
+                  />
+                  <datalist id="evermemos-rerank-model-options">
+                    {Array.from(new Set([...modelLists.assistant, ...modelLists.vision])).map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </datalist>
+                  <button
+                    type="button"
+                    className="settings-inline-btn"
+                    onClick={async () => {
+                      const baseUrl = settings.evermemos.rerank.baseUrl.trim()
+                      if (!baseUrl) {
+                        updateProviderFeedback('evermemosRerank', 'Rerank 地址不能为空', 'error')
+                        return
+                      }
+                      setProviderConnectionTesting((previous) => ({ ...previous, 'EverMemOS Rerank': true }))
+                      try {
+                        const models = await window.electronAPI.settings.listModels(baseUrl, settings.evermemos.rerank.apiKey)
+                        setModelLists((previous) => ({ ...previous, assistant: Array.from(new Set([...previous.assistant, ...models])) }))
+                        if (models.length > 0 && !models.includes(settings.evermemos.rerank.model)) {
+                          updateSettings((previous) => ({
+                            ...previous,
+                            evermemos: {
+                              ...previous.evermemos,
+                              rerank: {
+                                ...previous.evermemos.rerank,
+                                model: models[0]
+                              }
+                            }
+                          }))
+                        }
+                        updateProviderFeedback(
+                          'evermemosRerank',
+                          models.length > 0 ? `已拉取 ${models.length} 个 Rerank 模型` : 'Rerank 模型列表为空',
+                          models.length > 0 ? 'success' : 'info'
+                        )
+                      } catch (error) {
+                        const message = error instanceof Error ? error.message : '模型列表拉取失败'
+                        updateProviderFeedback('evermemosRerank', `Rerank 模型列表拉取失败: ${message}`, 'error')
+                      } finally {
+                        setProviderConnectionTesting((previous) => ({ ...previous, 'EverMemOS Rerank': false }))
+                      }
+                    }}
+                    disabled={providerConnectionTesting['EverMemOS Rerank'] === true}
+                  >
+                    {providerConnectionTesting['EverMemOS Rerank'] ? '拉取中...' : '拉取模型'}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-inline-btn"
+                    onClick={() => void testProviderConnection('evermemosRerank', 'EverMemOS Rerank 模型', settings.evermemos.rerank.baseUrl, settings.evermemos.rerank.apiKey, settings.evermemos.rerank.model)}
+                    disabled={providerConnectionTesting['EverMemOS Rerank 模型'] === true}
+                  >
+                    {providerConnectionTesting['EverMemOS Rerank 模型'] ? '测试中...' : '测试连接'}
+                  </button>
+                </div>
+                {providerFeedback.evermemosRerank && (
+                  <div className={`settings-feedback settings-feedback-${providerFeedback.evermemosRerank.tone}`}>
+                    {providerFeedback.evermemosRerank.message}
                   </div>
                 )}
               </div>

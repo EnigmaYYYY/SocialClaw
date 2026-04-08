@@ -233,6 +233,13 @@ export interface MemoryFileSection {
   items: MemoryFileListItem[]
 }
 
+export interface ChatBubble {
+  sender: 'user' | 'contact' | 'unknown'
+  name: string
+  text: string
+  timestamp: string | null
+}
+
 export interface MemoryFileDetail {
   path: string
   title: string
@@ -242,6 +249,7 @@ export interface MemoryFileDetail {
   sizeLabel: string
   tags: string[]
   content: string
+  bubbles?: ChatBubble[]
 }
 
 /**

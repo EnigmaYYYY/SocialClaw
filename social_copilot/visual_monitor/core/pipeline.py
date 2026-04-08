@@ -98,6 +98,9 @@ class VisualMonitorPipeline:
     _title_invisible_pattern = re.compile(r"[\u200b-\u200d\ufe0e\ufe0f]+")
     _title_text_char_pattern = re.compile(r"[A-Za-z0-9\u3400-\u9fff]")
     _DEFAULT_WECHAT_APP_ALIASES = ("wechat", "weixin", "wechatappex", "\u5fae\u4fe1")
+    _WINDOW_DEFAULT_APP_NAME = "window-default"
+    _UNKNOWN_APP_NAMES = {"unknown", "unknown_app", "n/a", "na", "none", "null"}
+    _FRONTMOST_APP_FALLBACK_TTL_S = 2.0
 
     def __init__(
         self,
@@ -155,6 +158,8 @@ class VisualMonitorPipeline:
         self._session_states: dict[str, SessionState] = {}
         self._active_session_key: str | None = None
         self._session_switch_count = 0
+        self._last_effective_frontmost_app: str | None = None
+        self._last_effective_frontmost_seen: float | None = None
         self._async_vlm_cfg = self.config.monitor.vlm_async
         self._async_vlm_enabled = bool(
             self._async_vlm_cfg.enabled and self.config.monitor.vision.mode == "vlm_structured"
@@ -176,8 +181,12 @@ class VisualMonitorPipeline:
             "events_emitted_total": 0,
             "last_run_ts": "",
             "last_frontmost_app": "",
+            "last_frontmost_app_effective": "",
             "last_frontmost_app_recheck": "",
+            "last_frontmost_app_recheck_effective": "",
             "last_frontmost_app_postcapture": "",
+            "last_frontmost_app_postcapture_effective": "",
+            "last_frontmost_app_fallback_used": False,
             "last_target_app": "",
             "last_gate_passed": None,
             "last_gate_skip_reason": "",
@@ -264,8 +273,14 @@ class VisualMonitorPipeline:
         self._debug_state["last_target_app"] = target_app_name
         self._debug_state["last_gate_skip_reason"] = ""
         if self.window_probe is not None:
-            frontmost_app = await asyncio.to_thread(self.window_probe.frontmost_app_name)
-            self._debug_state["last_frontmost_app"] = frontmost_app or ""
+            observed_frontmost = await asyncio.to_thread(self.window_probe.frontmost_app_name)
+            self._debug_state["last_frontmost_app"] = observed_frontmost or ""
+            frontmost_app = self._resolve_effective_frontmost_app(
+                observed_frontmost,
+                target_app_name=target_app_name,
+                target_app_aliases=target_app_aliases,
+            )
+            self._debug_state["last_frontmost_app_effective"] = frontmost_app or ""
             if not self._app_matches(frontmost_app, target_app_name, target_app_aliases):
                 self._foreground_gate_stable_app = None
                 self._foreground_gate_stable_since = None
@@ -335,6 +350,14 @@ class VisualMonitorPipeline:
                 interval_s=confirmation_interval_s,
             )
             self._debug_state["last_frontmost_app_recheck"] = frontmost_recheck or ""
+            effective_recheck = self._resolve_effective_frontmost_app(
+                frontmost_recheck,
+                target_app_name=target_app_name,
+                target_app_aliases=target_app_aliases,
+            )
+            self._debug_state["last_frontmost_app_recheck_effective"] = effective_recheck or ""
+            if not passed_recheck and self._app_matches(effective_recheck, target_app_name, target_app_aliases):
+                passed_recheck = True
             if not passed_recheck:
                 self._foreground_gate_stable_app = None
                 self._foreground_gate_stable_since = None
@@ -360,7 +383,7 @@ class VisualMonitorPipeline:
                 self._debug_state["last_decision_reason"] = "window_gate_recheck_samples_skipped"
                 return PipelineRunResult(next_interval_s=interval, events_emitted=events_emitted, changed=False)
 
-            frontmost_app = frontmost_recheck or frontmost_app
+            frontmost_app = effective_recheck or frontmost_app
             if frontmost_app:
                 window_bounds = await asyncio.to_thread(self.window_probe.frontmost_window_bounds, frontmost_app)
                 if hasattr(self.window_probe, "frontmost_window_title"):
@@ -395,8 +418,14 @@ class VisualMonitorPipeline:
         capture_ts = datetime.now(tz=timezone.utc)
         frame_cache_filename_token = self._frame_cache_timestamp_token(capture_ts)
         if self.window_probe is not None:
-            frontmost_postcapture = await asyncio.to_thread(self.window_probe.frontmost_app_name)
-            self._debug_state["last_frontmost_app_postcapture"] = frontmost_postcapture or ""
+            observed_postcapture = await asyncio.to_thread(self.window_probe.frontmost_app_name)
+            self._debug_state["last_frontmost_app_postcapture"] = observed_postcapture or ""
+            frontmost_postcapture = self._resolve_effective_frontmost_app(
+                observed_postcapture,
+                target_app_name=target_app_name,
+                target_app_aliases=target_app_aliases,
+            )
+            self._debug_state["last_frontmost_app_postcapture_effective"] = frontmost_postcapture or ""
             if not self._app_matches(frontmost_postcapture, target_app_name, target_app_aliases):
                 self._foreground_gate_stable_app = None
                 self._foreground_gate_stable_since = None
@@ -1075,15 +1104,46 @@ class VisualMonitorPipeline:
     def _is_pending_session_key(session_key: str | None) -> bool:
         return bool(session_key and str(session_key).startswith("pending:"))
 
-    @staticmethod
-    def _normalize_app_name(raw: str | None) -> str:
+    @classmethod
+    def _normalize_app_name(cls, raw: str | None) -> str:
         value = (raw or "").strip()
         if not value:
             return "\u5fae\u4fe1"
         lower = value.lower()
+        if lower == cls._WINDOW_DEFAULT_APP_NAME or lower in cls._UNKNOWN_APP_NAMES:
+            return "\u5fae\u4fe1"
         if "wechat" in lower or "\u5fae\u4fe1" in value:
             return "\u5fae\u4fe1"
         return value
+
+    def _resolve_effective_frontmost_app(
+        self,
+        observed_app: str | None,
+        target_app_name: str,
+        target_app_aliases: list[str] | None,
+    ) -> str | None:
+        normalized_observed = self._normalize_app_name(observed_app)
+        if self._app_matches(normalized_observed, target_app_name, target_app_aliases):
+            self._last_effective_frontmost_app = normalized_observed
+            self._last_effective_frontmost_seen = perf_counter()
+            self._debug_state["last_frontmost_app_fallback_used"] = False
+            return normalized_observed
+
+        if normalized_observed:
+            self._debug_state["last_frontmost_app_fallback_used"] = False
+            return normalized_observed
+
+        if (
+            self._last_effective_frontmost_app
+            and self._last_effective_frontmost_seen is not None
+            and (perf_counter() - self._last_effective_frontmost_seen) <= self._FRONTMOST_APP_FALLBACK_TTL_S
+            and self._app_matches(self._last_effective_frontmost_app, target_app_name, target_app_aliases)
+        ):
+            self._debug_state["last_frontmost_app_fallback_used"] = True
+            return self._last_effective_frontmost_app
+
+        self._debug_state["last_frontmost_app_fallback_used"] = False
+        return None
 
     def _build_session_key(self, app_name: str, conversation_title: str | None) -> str | None:
         title = self._canonicalize_session_title(conversation_title)

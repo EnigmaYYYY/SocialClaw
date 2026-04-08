@@ -913,9 +913,8 @@ export function AssistantBubbleApp(): JSX.Element {
     }
     setErrorMessage(null)
     setPendingSessionConfirmation(null)
-    await collapseToPet()
     await adapter.confirmPendingSession(pendingSessionConfirmation.pendingId, confirmedSessionName)
-  }, [collapseToPet, pendingSessionConfirmation])
+  }, [pendingSessionConfirmation])
 
   const confirmSuggestedPendingSession = useCallback(async () => {
     const adapter = adapterRef.current
@@ -924,12 +923,11 @@ export function AssistantBubbleApp(): JSX.Element {
     }
     setErrorMessage(null)
     setPendingSessionConfirmation(null)
-    await collapseToPet()
     await adapter.confirmPendingSession(
       pendingSessionConfirmation.pendingId,
       pendingSessionConfirmation.suggestedSessionName
     )
-  }, [collapseToPet, pendingSessionConfirmation])
+  }, [pendingSessionConfirmation])
 
   useEffect(() => {
     if (suggestions.length === 0 && highlightedSuggestionIndex !== 0) {

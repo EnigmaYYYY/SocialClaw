@@ -427,8 +427,11 @@ function EverMemOSSettings({
   settings,
   onSettingsChange
 }: EverMemOSSettingsProps): JSX.Element {
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [savingState, setSavingState] = useState<Record<string, { saving: boolean; message: string | null }>>({
+    llm: { saving: false, message: null },
+    vectorize: { saving: false, message: null },
+    rerank: { saving: false, message: null }
+  })
 
   // Update EverMemOS connection settings
   const updateEverMemOS = useCallback((key: keyof typeof settings.evermemos, value: unknown) => {
@@ -457,26 +460,79 @@ function EverMemOSSettings({
     onSettingsChange(newSettings)
   }, [settings, onSettingsChange])
 
-  // Save LLM config to backend
-  const handleSaveLLMConfig = useCallback(async () => {
-    setIsSaving(true)
-    setSaveMessage(null)
+  // Update Vectorize config
+  const updateVectorize = useCallback((key: string, value: unknown) => {
+    const newSettings: AppSettings = {
+      ...settings,
+      evermemos: {
+        ...settings.evermemos,
+        vectorize: {
+          ...settings.evermemos.vectorize,
+          [key]: value
+        }
+      }
+    }
+    onSettingsChange(newSettings)
+  }, [settings, onSettingsChange])
+
+  // Update Rerank config
+  const updateRerank = useCallback((key: string, value: unknown) => {
+    const newSettings: AppSettings = {
+      ...settings,
+      evermemos: {
+        ...settings.evermemos,
+        rerank: {
+          ...settings.evermemos.rerank,
+          [key]: value
+        }
+      }
+    }
+    onSettingsChange(newSettings)
+  }, [settings, onSettingsChange])
+
+  // Generic save config to backend helper
+  const handleSaveConfig = useCallback(async (configKey: string, endpoint: string, payload: Record<string, unknown>) => {
+    setSavingState((prev) => ({ ...prev, [configKey]: { saving: true, message: null } }))
     try {
-      const response = await fetch(`${settings.evermemos.apiBaseUrl}/api/v1/copilot/config/llm`, {
+      const response = await fetch(`${settings.evermemos.apiBaseUrl}/api/v1/copilot/config/${endpoint}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings.evermemos.llm)
+        body: JSON.stringify(payload)
       })
       if (!response.ok) {
         throw new Error(`保存失败: ${response.status}`)
       }
-      setSaveMessage('✅ 已保存到 EverMemOS 服务')
+      setSavingState((prev) => ({ ...prev, [configKey]: { saving: false, message: '已保存到 EverMemOS 服务' } }))
     } catch (error) {
-      setSaveMessage(`❌ 保存失败: ${error instanceof Error ? error.message : '未知错误'}`)
-    } finally {
-      setIsSaving(false)
+      setSavingState((prev) => ({ ...prev, [configKey]: { saving: false, message: `保存失败: ${error instanceof Error ? error.message : '未知错误'}` } }))
     }
-  }, [settings])
+  }, [settings.evermemos.apiBaseUrl])
+
+  const handleSaveLLMConfig = useCallback(() => {
+    void handleSaveConfig('llm', 'llm', {
+      base_url: settings.evermemos.llm.baseUrl,
+      api_key: settings.evermemos.llm.apiKey,
+      model: settings.evermemos.llm.model,
+      temperature: settings.evermemos.llm.temperature,
+      max_tokens: settings.evermemos.llm.maxTokens
+    })
+  }, [settings.evermemos.llm, handleSaveConfig])
+
+  const handleSaveVectorizeConfig = useCallback(() => {
+    void handleSaveConfig('vectorize', 'vectorize', {
+      base_url: settings.evermemos.vectorize.baseUrl,
+      api_key: settings.evermemos.vectorize.apiKey,
+      model: settings.evermemos.vectorize.model
+    })
+  }, [settings.evermemos.vectorize, handleSaveConfig])
+
+  const handleSaveRerankConfig = useCallback(() => {
+    void handleSaveConfig('rerank', 'rerank', {
+      base_url: settings.evermemos.rerank.baseUrl,
+      api_key: settings.evermemos.rerank.apiKey,
+      model: settings.evermemos.rerank.model
+    })
+  }, [settings.evermemos.rerank, handleSaveConfig])
 
   return (
     <div className="settings-section">
@@ -631,12 +687,114 @@ function EverMemOSSettings({
             type="button"
             className="btn btn-primary"
             onClick={handleSaveLLMConfig}
-            disabled={isSaving}
+            disabled={savingState.llm.saving}
           >
-            {isSaving ? '保存中...' : '保存到服务端'}
+            {savingState.llm.saving ? '保存中...' : '保存到服务端'}
           </button>
-          {saveMessage && (
-            <span className="save-message">{saveMessage}</span>
+          {savingState.llm.message && (
+            <span className="save-message">{savingState.llm.message}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Vectorize Configuration */}
+      <div className="settings-group">
+        <h3 className="settings-group-title">向量化配置</h3>
+        <p className="settings-group-desc">
+          配置 EverMemOS 使用的向量化模型参数
+        </p>
+        <div className="settings-input-row">
+          <label className="input-label">API Base URL</label>
+          <input
+            type="text"
+            className="settings-input"
+            value={settings.evermemos.vectorize.baseUrl}
+            onChange={(e) => updateVectorize('baseUrl', e.target.value)}
+            placeholder="http://127.0.0.1:11434/v1"
+          />
+        </div>
+        <div className="settings-input-row">
+          <label className="input-label">API Key</label>
+          <input
+            type="password"
+            className="settings-input"
+            value={settings.evermemos.vectorize.apiKey}
+            onChange={(e) => updateVectorize('apiKey', e.target.value)}
+            placeholder="sk-..."
+          />
+        </div>
+        <div className="settings-input-row">
+          <label className="input-label">模型名称</label>
+          <input
+            type="text"
+            className="settings-input"
+            value={settings.evermemos.vectorize.model}
+            onChange={(e) => updateVectorize('model', e.target.value)}
+            placeholder="Qwen/Qwen3-Embedding-4B"
+          />
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleSaveVectorizeConfig}
+            disabled={savingState.vectorize.saving}
+          >
+            {savingState.vectorize.saving ? '保存中...' : '保存到服务端'}
+          </button>
+          {savingState.vectorize.message && (
+            <span className="save-message">{savingState.vectorize.message}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Rerank Configuration */}
+      <div className="settings-group">
+        <h3 className="settings-group-title">重排序配置</h3>
+        <p className="settings-group-desc">
+          配置 EverMemOS 使用的重排序模型参数
+        </p>
+        <div className="settings-input-row">
+          <label className="input-label">API Base URL</label>
+          <input
+            type="text"
+            className="settings-input"
+            value={settings.evermemos.rerank.baseUrl}
+            onChange={(e) => updateRerank('baseUrl', e.target.value)}
+            placeholder="https://api.siliconflow.cn/v1/rerank"
+          />
+        </div>
+        <div className="settings-input-row">
+          <label className="input-label">API Key</label>
+          <input
+            type="password"
+            className="settings-input"
+            value={settings.evermemos.rerank.apiKey}
+            onChange={(e) => updateRerank('apiKey', e.target.value)}
+            placeholder="sk-..."
+          />
+        </div>
+        <div className="settings-input-row">
+          <label className="input-label">模型名称</label>
+          <input
+            type="text"
+            className="settings-input"
+            value={settings.evermemos.rerank.model}
+            onChange={(e) => updateRerank('model', e.target.value)}
+            placeholder="Qwen/Qwen3-Reranker-4B"
+          />
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleSaveRerankConfig}
+            disabled={savingState.rerank.saving}
+          >
+            {savingState.rerank.saving ? '保存中...' : '保存到服务端'}
+          </button>
+          {savingState.rerank.message && (
+            <span className="save-message">{savingState.rerank.message}</span>
           )}
         </div>
       </div>

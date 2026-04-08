@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from 'fs/promises'
-import { join } from 'path'
+import { dirname, join } from 'path'
 
 const DEFAULT_MAX_RECORDS = 2000
 const DEFAULT_WINDOW_SIZE = 120
@@ -107,6 +107,12 @@ interface PendingChatRecordFile {
   messages: ChatRecordEntry[]
 }
 
+interface SessionNameMappingsFile {
+  schema_version?: number
+  mappings_by_owner?: Record<string, Record<string, string>>
+  mappings?: Record<string, string>
+}
+
 export interface ChatRecordCurrentSession {
   sessionKey: string
   sessionName: string
@@ -200,6 +206,11 @@ const PENDING_SESSIONS_DIR_NAME = '.pending_sessions'
 const SESSION_ALIAS_SIMILARITY_THRESHOLD = 0.76
 const CONFIRMED_SESSION_ALIAS_SIMILARITY_THRESHOLD = 0.5
 const AUTO_REUSE_ALIAS_COUNT_THRESHOLD = 2
+const WECHAT_APP_NAME = '\u5fae\u4fe1'
+const WINDOW_DEFAULT_APP_NAME = 'window-default'
+const UNKNOWN_APP_NAMES = new Set(['unknown', 'unknown_app', 'n/a', 'na', 'none', 'null'])
+const NAME_MAPPINGS_FILE_NAME = '.name_mappings.json'
+const NAME_MAPPINGS_SCHEMA_VERSION = 1
 
 const INVISIBLE_TITLE_REGEX = /[\u200B-\u200D\uFE0E\uFE0F]/gu
 const TITLE_TEXT_CHAR_REGEX = /[A-Za-z0-9\u3400-\u9fff]/
@@ -296,15 +307,18 @@ export async function ingestChatRecordsAndGetRecent(
   let pendingConfirmation: PendingChatRecordSession | null = null
   const confirmedCandidateCache = new Map<string, StoredSessionCandidate[]>()
   const pendingCandidateCache = new Map<string, PendingSessionCandidate[]>()
+  const sessionNameMappings = await loadSessionNameMappings(recordsDir, ownerUserId)
 
   for (const [sessionKey, rows] of grouped.entries()) {
     const split = splitSessionKey(sessionKey)
     const authoritativeTitleKey = resolveAuthoritativeSessionTitleKey(sessionKey, split.sessionName)
-    const displaySessionName = resolveDisplaySessionName(
+    const displaySessionNameRaw = resolveDisplaySessionName(
       rows.map((row) => row.conversation_title ?? deriveConversationTitleFromConversationId(row.conversation_id)).reverse(),
       split.sessionName,
       authoritativeTitleKey
     )
+    const mappedSessionName = resolveMappedSessionName(displaySessionNameRaw, sessionNameMappings)
+    const displaySessionName = mappedSessionName || displaySessionNameRaw
     if (!confirmationEnabled) {
       const appDir = join(recordsDir, sanitizeSessionName(split.appName))
       await mkdir(appDir, { recursive: true })
@@ -347,6 +361,46 @@ export async function ingestChatRecordsAndGetRecent(
       options
     )
     const storedMatch = findBestStoredSessionMatch(confirmedCandidates, displaySessionName)
+
+    if (mappedSessionName && (!storedMatch || !storedMatch.exact)) {
+      const mappedSessionKey = normalizeSessionKey(null, split.appName, mappedSessionName, mappedSessionName)
+      const mappedSplit = splitSessionKey(mappedSessionKey)
+      const appDir = join(recordsDir, sanitizeSessionName(mappedSplit.appName))
+      await mkdir(appDir, { recursive: true })
+      const filePath = join(appDir, `${sanitizeSessionName(mappedSplit.sessionName)}.json`)
+      const snapshot = await appendRowsToStoredChatRecordFile(
+        recordsDir,
+        filePath,
+        {
+          appName: mappedSplit.appName,
+          sessionKey: mappedSessionKey,
+          sessionName: mappedSessionName
+        },
+        rows,
+        ownerUserId,
+        safeLimit,
+        captureDedupWindowMs,
+        [displaySessionNameRaw, ...rows.map((row) => row.conversation_title ?? null)]
+      )
+      updatedSessions.push({
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        appendedCount: snapshot.appendedCount
+      })
+      const currentSnapshot: ChatRecordCurrentSession = {
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        recentMessages: snapshot.recentMessages
+      }
+      sessionSnapshots.set(snapshot.sessionKey, currentSnapshot)
+      if (sessionKey === currentSessionKey) {
+        currentSession = currentSnapshot
+      }
+      confirmedCandidateCache.delete(split.appName)
+      continue
+    }
 
     if (storedMatch && (storedMatch.exact || canAutoReuseStoredSessionMatch(storedMatch))) {
       const snapshot = await appendRowsToStoredChatRecordFile(
@@ -648,6 +702,15 @@ export async function confirmPendingChatRecordSession(
   }
   await writeFile(targetFilePath, JSON.stringify(next, null, 2), 'utf-8')
   await unlink(pendingCandidate.filePath).catch(() => undefined)
+  const sessionNameMappings = await loadSessionNameMappings(recordsDir, ownerUserId)
+  const mappingChanged = learnSessionNameMappingsFromPending(
+    pendingCandidate,
+    normalizedConfirmedSessionName,
+    sessionNameMappings
+  )
+  if (mappingChanged) {
+    await saveSessionNameMappings(recordsDir, ownerUserId, sessionNameMappings)
+  }
 
   return {
     sessionKey: targetSessionKey,
@@ -1071,6 +1134,9 @@ async function collectPendingSessionFiles(recordsDir: string, appName?: string):
         continue
       }
       if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+        if (entry.name.toLowerCase() === NAME_MAPPINGS_FILE_NAME) {
+          continue
+        }
         result.push(nextPath)
       }
     }
@@ -1081,6 +1147,131 @@ async function collectPendingSessionFiles(recordsDir: string, appName?: string):
 
 function getPendingSessionsRoot(recordsDir: string): string {
   return join(recordsDir, PENDING_SESSIONS_DIR_NAME)
+}
+
+function getNameMappingsFilePath(recordsDir: string): string {
+  return join(dirname(recordsDir), NAME_MAPPINGS_FILE_NAME)
+}
+
+function getLegacyNameMappingsFilePath(recordsDir: string): string {
+  return join(recordsDir, NAME_MAPPINGS_FILE_NAME)
+}
+
+async function loadSessionNameMappings(recordsDir: string, ownerUserId: string): Promise<Map<string, string>> {
+  const candidatePaths = [getNameMappingsFilePath(recordsDir), getLegacyNameMappingsFilePath(recordsDir)]
+  for (const path of candidatePaths) {
+    try {
+      const raw = await readFile(path, 'utf-8')
+      const parsed = JSON.parse(raw) as SessionNameMappingsFile
+      const root = parsed && typeof parsed === 'object' ? parsed : {}
+      const byOwner = root.mappings_by_owner && typeof root.mappings_by_owner === 'object'
+        ? root.mappings_by_owner
+        : {}
+      const ownerKey = normalizeOptionalText(ownerUserId) || 'default'
+      const scoped = byOwner[ownerKey]
+      const fallback = root.mappings
+      const source = (scoped && typeof scoped === 'object' ? scoped : fallback) ?? {}
+      const mappings = new Map<string, string>()
+      for (const [from, to] of Object.entries(source)) {
+        const key = normalizeSessionTitleKey(from)
+        const value = normalizeConversationTitle(to)
+        if (!key || !value) {
+          continue
+        }
+        mappings.set(key, value)
+      }
+      return mappings
+    } catch {
+      // try next candidate path
+    }
+  }
+  return new Map()
+}
+
+async function saveSessionNameMappings(
+  recordsDir: string,
+  ownerUserId: string,
+  mappings: Map<string, string>
+): Promise<void> {
+  const path = getNameMappingsFilePath(recordsDir)
+  await mkdir(dirname(path), { recursive: true })
+  let parsed: SessionNameMappingsFile = {
+    schema_version: NAME_MAPPINGS_SCHEMA_VERSION,
+    mappings_by_owner: {}
+  }
+  try {
+    const raw = await readFile(path, 'utf-8')
+    const existing = JSON.parse(raw) as SessionNameMappingsFile
+    if (existing && typeof existing === 'object') {
+      parsed = {
+        schema_version: NAME_MAPPINGS_SCHEMA_VERSION,
+        mappings_by_owner: existing.mappings_by_owner && typeof existing.mappings_by_owner === 'object'
+          ? existing.mappings_by_owner
+          : {}
+      }
+    }
+  } catch {
+    // create fresh mappings file
+  }
+  const nextOwnerMap: Record<string, string> = {}
+  for (const [from, to] of Array.from(mappings.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const key = normalizeSessionTitleKey(from)
+    const value = normalizeConversationTitle(to)
+    if (!key || !value) {
+      continue
+    }
+    nextOwnerMap[key] = value
+  }
+  const ownerKey = normalizeOptionalText(ownerUserId) || 'default'
+  parsed.schema_version = NAME_MAPPINGS_SCHEMA_VERSION
+  parsed.mappings_by_owner = parsed.mappings_by_owner ?? {}
+  parsed.mappings_by_owner[ownerKey] = nextOwnerMap
+  await writeFile(path, JSON.stringify(parsed, null, 2), 'utf-8')
+}
+
+function resolveMappedSessionName(rawSessionName: string | null, mappings: Map<string, string>): string | null {
+  const key = normalizeSessionTitleKey(rawSessionName)
+  if (!key) {
+    return null
+  }
+  const mapped = mappings.get(key)
+  return normalizeConversationTitle(mapped ?? null)
+}
+
+function learnSessionNameMappingsForAliases(
+  aliases: Array<string | null | undefined>,
+  confirmedSessionName: string,
+  mappings: Map<string, string>
+): boolean {
+  const canonical = normalizeConversationTitle(confirmedSessionName)
+  if (!canonical) {
+    return false
+  }
+  let changed = false
+  for (const alias of aliases) {
+    const key = normalizeSessionTitleKey(alias ?? null)
+    if (!key) {
+      continue
+    }
+    if (mappings.get(key) === canonical) {
+      continue
+    }
+    mappings.set(key, canonical)
+    changed = true
+  }
+  return changed
+}
+
+function learnSessionNameMappingsFromPending(
+  pendingCandidate: PendingSessionCandidate,
+  confirmedSessionName: string,
+  mappings: Map<string, string>
+): boolean {
+  return learnSessionNameMappingsForAliases(
+    [pendingCandidate.sessionName, ...pendingCandidate.titleAliases],
+    confirmedSessionName,
+    mappings
+  )
 }
 
 function computeSessionTitleSimilarity(left: string | null, right: string | null): number {
@@ -1697,25 +1888,25 @@ function normalizeSessionKey(
   const fromEvent = normalizeOptionalText(rawSessionKey)
   if (fromEvent) {
     const split = splitSessionKey(fromEvent)
-    return `${split.appName}::${split.sessionName}`
+    return `${normalizeAppName(split.appName)}::${split.sessionName}`
   }
   const sessionName =
     normalizeSessionTitleKey(title)
     || normalizeSessionTitleKey(contactName)
     || 'unknown_session'
-  return `${appName}::${sessionName}`
+  return `${normalizeAppName(appName)}::${sessionName}`
 }
 
 function splitSessionKey(sessionKey: string): SessionSplit {
-  const raw = normalizeOptionalText(sessionKey) || '微信::unknown_session'
+  const raw = normalizeOptionalText(sessionKey) || `${WECHAT_APP_NAME}::unknown_session`
   const idx = raw.indexOf('::')
   if (idx <= 0 || idx >= raw.length - 2) {
     return {
-      appName: '微信',
+      appName: WECHAT_APP_NAME,
       sessionName: sanitizeSessionName(normalizeSessionTitleKey(raw) || raw)
     }
   }
-  const appName = sanitizeSessionName(raw.slice(0, idx))
+  const appName = sanitizeSessionName(normalizeAppName(raw.slice(0, idx)))
   const sessionName = sanitizeSessionName(normalizeSessionTitleKey(raw.slice(idx + 2)) || raw.slice(idx + 2))
   return { appName, sessionName }
 }
@@ -1888,15 +2079,18 @@ function mergeTitleAliases(
 
 function normalizeAppName(raw: string | null): string {
   if (!raw) {
-    return '微信'
+    return WECHAT_APP_NAME
   }
   const value = raw.trim()
   if (!value) {
-    return '微信'
+    return WECHAT_APP_NAME
   }
   const lower = value.toLowerCase()
-  if (lower.includes('wechat') || value.includes('微信')) {
-    return '微信'
+  if (lower === WINDOW_DEFAULT_APP_NAME || UNKNOWN_APP_NAMES.has(lower)) {
+    return WECHAT_APP_NAME
+  }
+  if (lower.includes('wechat') || value.includes(WECHAT_APP_NAME)) {
+    return WECHAT_APP_NAME
   }
   return value
 }
@@ -2890,4 +3084,14 @@ function repairDirectChatMessages(
   })
 
   return { messages: nextMessages, repairedMessages }
+}
+
+export const __chatRecordsTestUtils = {
+  normalizeAppName,
+  normalizeSessionKey,
+  buildPendingSessionId,
+  resolveMappedSessionName,
+  learnSessionNameMappingsForAliases,
+  loadSessionNameMappings,
+  saveSessionNameMappings
 }

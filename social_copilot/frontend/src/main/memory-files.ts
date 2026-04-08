@@ -36,6 +36,13 @@ export interface MemoryFileSection {
   items: MemoryFileListItem[]
 }
 
+export interface ChatBubble {
+  sender: 'user' | 'contact' | 'unknown'
+  name: string
+  text: string
+  timestamp: string | null
+}
+
 export interface MemoryFileDetail {
   path: string
   title: string
@@ -45,6 +52,7 @@ export interface MemoryFileDetail {
   sizeLabel: string
   tags: string[]
   content: string
+  bubbles?: ChatBubble[]
 }
 
 interface RootDescriptor {
@@ -141,7 +149,8 @@ export async function readMemoryItem(
     updatedAt: fileStat.mtime.toISOString(),
     sizeLabel: formatBytes(fileStat.size),
     tags: parsed.tags,
-    content: parsed.content
+    content: parsed.content,
+    bubbles: parsed.bubbles
   }
 }
 
@@ -310,7 +319,7 @@ function summarizeFileContent(
   filePath: string,
   rawContent: string,
   ownerUserId?: string
-): { title: string; summary: string; titleMeta?: string | null; tags: string[]; content: string; skip: boolean } {
+): { title: string; summary: string; titleMeta?: string | null; tags: string[]; content: string; bubbles?: ChatBubble[]; skip: boolean } {
   const fileName = basename(filePath, extname(filePath))
   const trimmed = rawContent.trim()
   const tags = new Set<string>()
@@ -361,6 +370,7 @@ function summarizeFileContent(
             titleMeta: formatCountLabel(parsed.messages.length),
             tags: Array.from(tags),
             content: buildChatTranscript(parsed),
+            bubbles: buildChatBubbles(parsed),
             skip: false
           }
         }
@@ -489,6 +499,33 @@ function buildChatTranscript(parsed: Record<string, unknown>): string {
   }
 
   return lines.join('\n')
+}
+
+function buildChatBubbles(parsed: Record<string, unknown>): ChatBubble[] {
+  const sessionName = typeof parsed.session_name === 'string' ? parsed.session_name : 'Contact'
+  const messages = Array.isArray(parsed.messages) ? parsed.messages : []
+  return messages
+    .filter(isRecord)
+    .map((msg): ChatBubble | null => {
+      const metadata = isRecord(msg.metadata) ? msg.metadata : null
+      const rawText = typeof msg.content === 'string' ? msg.content.trim()
+        : typeof msg.text === 'string' ? msg.text.trim() : ''
+      const nonText = (metadata && typeof metadata.non_text_description === 'string')
+        ? metadata.non_text_description.trim()
+        : typeof msg.non_text_description === 'string' ? msg.non_text_description.trim() : ''
+      const text = rawText || (nonText ? `[${nonText}]` : '')
+      if (!text) return null
+
+      const sender = (typeof msg.sender_type === 'string' ? msg.sender_type
+        : typeof msg.sender === 'string' ? msg.sender : 'unknown') as ChatBubble['sender']
+      const senderName = typeof msg.sender_name === 'string' ? msg.sender_name.trim() : ''
+      const contactName = senderName || (metadata && typeof metadata.contact_name === 'string'
+        ? metadata.contact_name.trim() : '')
+      const name = sender === 'user' ? (senderName || 'Me') : (contactName || sessionName)
+      const timestamp = typeof msg.timestamp === 'string' ? msg.timestamp : null
+      return { sender, name, text, timestamp }
+    })
+    .filter((b): b is ChatBubble => b !== null)
 }
 
 function buildProfileContent(parsed: Record<string, unknown>): string {
@@ -632,7 +669,7 @@ function formatTimeLabel(value: string): string {
 }
 
 function formatCountLabel(count: number): string {
-  return `${count} messages`
+  return `${count}条消息`
 }
 
 function startCase(value: string): string {
