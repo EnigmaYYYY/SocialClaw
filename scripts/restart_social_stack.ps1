@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RootDir = "",
   [string]$VisualMonitorPython = "D:\conda_envs\emos2\python.exe",
   [string]$EverMemOSPython = "D:\conda_envs\emos2\python.exe",
@@ -20,8 +20,8 @@ if ([string]::IsNullOrWhiteSpace($RootDir)) {
   $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 
-$stopScript = Join-Path $PSScriptRoot "stop_socialclaw_win.ps1"
-$startScript = Join-Path $PSScriptRoot "start_socialclaw_win.ps1"
+$stopScript = Join-Path $PSScriptRoot "stop_social_stack.ps1"
+$startScript = Join-Path $PSScriptRoot "start_social_stack.ps1"
 
 Write-Host "[1/3] Stopping stack..."
 & $stopScript -RootDir $RootDir -SkipDocker:(-not $ForceDockerRestart)

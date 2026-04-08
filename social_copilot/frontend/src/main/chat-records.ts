@@ -87,6 +87,21 @@ interface ChatRecordFile {
   app_name: string
   canonical_title_key?: string
   title_aliases?: string[]
+  confirmed_title_aliases?: string[]
+  owner_user_id?: string
+  updated_at: string
+  messages: ChatRecordEntry[]
+}
+
+interface PendingChatRecordFile {
+  schema_version?: number
+  pending_id: string
+  session_name: string
+  session_key: string
+  app_name: string
+  suggested_session_name?: string | null
+  suggested_session_key?: string | null
+  title_aliases?: string[]
   owner_user_id?: string
   updated_at: string
   messages: ChatRecordEntry[]
@@ -96,6 +111,16 @@ export interface ChatRecordCurrentSession {
   sessionKey: string
   sessionName: string
   filePath: string
+  recentMessages: ChatRecordEntry[]
+}
+
+export interface PendingChatRecordSession {
+  pendingId: string
+  sessionKey: string
+  sessionName: string
+  filePath: string
+  suggestedSessionKey: string | null
+  suggestedSessionName: string | null
   recentMessages: ChatRecordEntry[]
 }
 
@@ -125,10 +150,12 @@ export interface ChatRecordIngestResult {
   currentSession: ChatRecordCurrentSession
   latestUpdatedSession: ChatRecordCurrentSession | null
   updatedSessions: ChatRecordUpdatedSession[]
+  pendingConfirmation: PendingChatRecordSession | null
 }
 
 export interface ChatRecordMaintenanceOptions {
   captureDedupWindowMs?: number | null
+  sessionConfirmationMode?: 'off' | 'realtime' | null
 }
 
 interface SessionSplit {
@@ -136,7 +163,43 @@ interface SessionSplit {
   sessionName: string
 }
 
+interface StoredSessionCandidate {
+  sessionKey: string
+  sessionName: string
+  filePath: string
+  appName: string
+  canonicalTitleKey: string | null
+  titleAliases: string[]
+  confirmedTitleAliases: string[]
+}
+
+interface StoredSessionMatch {
+  candidate: StoredSessionCandidate
+  score: number
+  exact: boolean
+  aliasScore: number
+  confirmedAliasScore: number
+  matchedViaConfirmedAlias: boolean
+}
+
+interface PendingSessionCandidate {
+  pendingId: string
+  sessionKey: string
+  sessionName: string
+  filePath: string
+  appName: string
+  suggestedSessionKey: string | null
+  suggestedSessionName: string | null
+  titleAliases: string[]
+  messages: ChatRecordEntry[]
+}
+
 const CHAT_RECORD_SCHEMA_VERSION = 3
+const PENDING_CHAT_RECORD_SCHEMA_VERSION = 1
+const PENDING_SESSIONS_DIR_NAME = '.pending_sessions'
+const SESSION_ALIAS_SIMILARITY_THRESHOLD = 0.76
+const CONFIRMED_SESSION_ALIAS_SIMILARITY_THRESHOLD = 0.5
+const AUTO_REUSE_ALIAS_COUNT_THRESHOLD = 2
 
 const INVISIBLE_TITLE_REGEX = /[\u200B-\u200D\uFE0E\uFE0F]/gu
 const TITLE_TEXT_CHAR_REGEX = /[A-Za-z0-9\u3400-\u9fff]/
@@ -225,69 +288,140 @@ export async function ingestChatRecordsAndGetRecent(
 
   const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 10
   const captureDedupWindowMs = normalizeCaptureDedupWindowMs(options?.captureDedupWindowMs)
+  const confirmationEnabled = options?.sessionConfirmationMode === 'realtime'
   const updatedSessions: ChatRecordUpdatedSession[] = []
   const currentSessionKey = normalized[normalized.length - 1]?.conversation_id
   let currentSession: ChatRecordCurrentSession | null = null
   const sessionSnapshots = new Map<string, ChatRecordCurrentSession>()
+  let pendingConfirmation: PendingChatRecordSession | null = null
+  const confirmedCandidateCache = new Map<string, StoredSessionCandidate[]>()
+  const pendingCandidateCache = new Map<string, PendingSessionCandidate[]>()
 
   for (const [sessionKey, rows] of grouped.entries()) {
     const split = splitSessionKey(sessionKey)
-    const safeAppName = sanitizeSessionName(split.appName)
-    const safeSessionName = sanitizeSessionName(split.sessionName)
     const authoritativeTitleKey = resolveAuthoritativeSessionTitleKey(sessionKey, split.sessionName)
     const displaySessionName = resolveDisplaySessionName(
       rows.map((row) => row.conversation_title ?? deriveConversationTitleFromConversationId(row.conversation_id)).reverse(),
       split.sessionName,
       authoritativeTitleKey
     )
-    const appDir = join(recordsDir, safeAppName)
-    await mkdir(appDir, { recursive: true })
-    const filePath = join(appDir, `${safeSessionName}.json`)
-    const existing = await loadChatRecordFile(filePath, split)
-    const mergedMessages = mergeRecordMessages(
-      existing.messages,
-      rows,
-      DEFAULT_WINDOW_SIZE,
-      DEFAULT_MEDIA_SIMILARITY_THRESHOLD,
-      captureDedupWindowMs
-    )
-    const appendedCount = Math.max(0, mergedMessages.length - existing.messages.length)
-    const next: ChatRecordFile = {
-      schema_version: CHAT_RECORD_SCHEMA_VERSION,
-      session_name: displaySessionName,
-      session_key: sessionKey,
-      app_name: split.appName,
-      canonical_title_key: normalizeSessionTitleKey(displaySessionName) || split.sessionName,
-      title_aliases: mergeTitleAliases(
-        existing.title_aliases,
-        existing.session_name,
+    if (!confirmationEnabled) {
+      const appDir = join(recordsDir, sanitizeSessionName(split.appName))
+      await mkdir(appDir, { recursive: true })
+      const filePath = join(appDir, `${sanitizeSessionName(split.sessionName)}.json`)
+      const snapshot = await appendRowsToStoredChatRecordFile(
+        recordsDir,
+        filePath,
+        {
+          appName: split.appName,
+          sessionKey,
+          sessionName: displaySessionName
+        },
         rows,
-        displaySessionName,
-        authoritativeTitleKey
-      ),
-      owner_user_id: ownerUserId,
-      updated_at: new Date().toISOString(),
-      messages: mergedMessages
+        ownerUserId,
+        safeLimit,
+        captureDedupWindowMs
+      )
+      updatedSessions.push({
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        appendedCount: snapshot.appendedCount
+      })
+      const currentSnapshot: ChatRecordCurrentSession = {
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        recentMessages: snapshot.recentMessages
+      }
+      sessionSnapshots.set(snapshot.sessionKey, currentSnapshot)
+      if (sessionKey === currentSessionKey) {
+        currentSession = currentSnapshot
+      }
+      continue
     }
-    await writeFile(filePath, JSON.stringify(next, null, 2), 'utf-8')
+    const confirmedCandidates = await getStoredSessionCandidates(
+      recordsDir,
+      split.appName,
+      confirmedCandidateCache,
+      options
+    )
+    const storedMatch = findBestStoredSessionMatch(confirmedCandidates, displaySessionName)
 
-    updatedSessions.push({
-      sessionKey,
-      sessionName: displaySessionName,
-      filePath,
-      appendedCount
-    })
+    if (storedMatch && (storedMatch.exact || canAutoReuseStoredSessionMatch(storedMatch))) {
+      const snapshot = await appendRowsToStoredChatRecordFile(
+        recordsDir,
+        storedMatch.candidate.filePath,
+        {
+          appName: storedMatch.candidate.appName,
+          sessionKey: storedMatch.candidate.sessionKey,
+          sessionName: storedMatch.candidate.sessionName
+        },
+        rows,
+        ownerUserId,
+        safeLimit,
+        captureDedupWindowMs,
+        storedMatch.matchedViaConfirmedAlias
+          ? [displaySessionName, ...rows.map((row) => row.conversation_title ?? null)]
+          : []
+      )
 
-    const snapshot: ChatRecordCurrentSession = {
-      sessionKey,
-      sessionName: displaySessionName,
-      filePath,
-      recentMessages: mergedMessages.slice(-safeLimit)
+      updatedSessions.push({
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        appendedCount: snapshot.appendedCount
+      })
+
+      const currentSnapshot: ChatRecordCurrentSession = {
+        sessionKey: snapshot.sessionKey,
+        sessionName: snapshot.sessionName,
+        filePath: snapshot.filePath,
+        recentMessages: snapshot.recentMessages
+      }
+      sessionSnapshots.set(snapshot.sessionKey, currentSnapshot)
+      if (sessionKey === currentSessionKey) {
+        currentSession = currentSnapshot
+      }
+      confirmedCandidateCache.delete(split.appName)
+      continue
     }
-    sessionSnapshots.set(sessionKey, snapshot)
 
-    if (sessionKey === currentSessionKey) {
-      currentSession = snapshot
+    const shouldRequireConfirmation = !storedMatch || !storedMatch.exact
+    if (shouldRequireConfirmation) {
+      const pendingCandidates = await getPendingSessionCandidates(
+        recordsDir,
+        split.appName,
+        pendingCandidateCache
+      )
+      const pendingMatch = findBestPendingSessionMatch(pendingCandidates, displaySessionName, storedMatch)
+      const pendingSnapshot = await appendRowsToPendingChatRecordFile(
+        recordsDir,
+        pendingMatch,
+        {
+          appName: split.appName,
+          sessionKey,
+          sessionName: displaySessionName,
+          suggestedSessionKey: storedMatch?.candidate.sessionKey ?? null,
+          suggestedSessionName: storedMatch?.candidate.sessionName ?? null
+        },
+        rows,
+        ownerUserId,
+        safeLimit,
+        captureDedupWindowMs
+      )
+
+      if (sessionKey === currentSessionKey) {
+        currentSession = {
+          sessionKey: pendingSnapshot.sessionKey,
+          sessionName: pendingSnapshot.sessionName,
+          filePath: pendingSnapshot.filePath,
+          recentMessages: pendingSnapshot.recentMessages
+        }
+        pendingConfirmation = pendingSnapshot
+      }
+      pendingCandidateCache.delete(split.appName)
+      continue
     }
   }
 
@@ -304,7 +438,16 @@ export async function ingestChatRecordsAndGetRecent(
   }
 
   if (!currentSession) {
-    throw new Error('current_session_not_found')
+    if (pendingConfirmation) {
+      currentSession = {
+        sessionKey: pendingConfirmation.sessionKey,
+        sessionName: pendingConfirmation.sessionName,
+        filePath: pendingConfirmation.filePath,
+        recentMessages: pendingConfirmation.recentMessages
+      }
+    } else {
+      throw new Error('current_session_not_found')
+    }
   }
 
   const appendedSessionKeys = new Set(
@@ -327,7 +470,8 @@ export async function ingestChatRecordsAndGetRecent(
   return {
     currentSession,
     latestUpdatedSession,
-    updatedSessions
+    updatedSessions,
+    pendingConfirmation
   }
 }
 
@@ -412,6 +556,661 @@ export async function loadRecentChatRecordSession(
     filePath: matched.filePath,
     recentMessages: matched.recentMessages
   }
+}
+
+export async function confirmPendingChatRecordSession(
+  recordsDir: string,
+  pendingId: string,
+  confirmedSessionName: string,
+  ownerUserId: string,
+  ownerDisplayName: string,
+  limit: number = 10,
+  options?: ChatRecordMaintenanceOptions
+): Promise<ChatRecordCurrentSession> {
+  const normalizedPendingId = normalizeOptionalText(pendingId)
+  const normalizedConfirmedSessionName = normalizeConversationTitle(confirmedSessionName)
+  if (!normalizedPendingId) {
+    throw new Error('pendingId is required')
+  }
+  if (!normalizedConfirmedSessionName) {
+    throw new Error('confirmedSessionName is required')
+  }
+
+  await mkdir(recordsDir, { recursive: true })
+  const pendingCandidate = await findPendingSessionCandidateById(recordsDir, normalizedPendingId)
+  if (!pendingCandidate) {
+    throw new Error('pending_session_not_found')
+  }
+
+  const storedCandidates = await getStoredSessionCandidates(
+    recordsDir,
+    pendingCandidate.appName,
+    new Map(),
+    options
+  )
+  const explicitMatch = findBestStoredSessionMatch(storedCandidates, normalizedConfirmedSessionName)
+  const targetSessionKey = explicitMatch?.exact
+    ? explicitMatch.candidate.sessionKey
+    : normalizeSessionKey(null, pendingCandidate.appName, normalizedConfirmedSessionName, normalizedConfirmedSessionName)
+  const targetSplit = splitSessionKey(targetSessionKey)
+  const targetAppDir = join(recordsDir, sanitizeSessionName(targetSplit.appName))
+  await mkdir(targetAppDir, { recursive: true })
+  const targetFilePath = explicitMatch?.exact
+    ? explicitMatch.candidate.filePath
+    : join(targetAppDir, `${sanitizeSessionName(targetSplit.sessionName)}.json`)
+
+  const captureDedupWindowMs = normalizeCaptureDedupWindowMs(options?.captureDedupWindowMs)
+  const existing = await loadChatRecordFile(targetFilePath, {
+    appName: targetSplit.appName,
+    sessionName: normalizedConfirmedSessionName
+  }, options)
+  const pendingRows = retargetChatRecordEntriesToSession(
+    pendingCandidate.messages,
+    targetSessionKey,
+    normalizedConfirmedSessionName
+  )
+  const mergedMessages = mergeRecordMessages(
+    existing.messages,
+    pendingRows,
+    DEFAULT_WINDOW_SIZE,
+    DEFAULT_MEDIA_SIMILARITY_THRESHOLD,
+    captureDedupWindowMs
+  )
+  const next: ChatRecordFile = {
+    schema_version: CHAT_RECORD_SCHEMA_VERSION,
+    session_name: normalizedConfirmedSessionName,
+    session_key: targetSessionKey,
+    app_name: targetSplit.appName,
+    canonical_title_key: normalizeSessionTitleKey(normalizedConfirmedSessionName) || targetSplit.sessionName,
+    title_aliases: mergeForcedTitleAliases(
+      mergeTitleAliases(
+        existing.title_aliases,
+        existing.session_name,
+        pendingRows,
+        normalizedConfirmedSessionName,
+        normalizeSessionTitleKey(normalizedConfirmedSessionName) || targetSplit.sessionName
+      ),
+      [
+        ...pendingCandidate.titleAliases,
+        pendingCandidate.sessionName
+      ]
+    ),
+    confirmed_title_aliases: mergeForcedTitleAliases(
+      existing.confirmed_title_aliases,
+      [
+        ...pendingCandidate.titleAliases,
+        pendingCandidate.sessionName
+      ]
+    ),
+    owner_user_id: ownerUserId || existing.owner_user_id,
+    updated_at: new Date().toISOString(),
+    messages: mergedMessages
+  }
+  await writeFile(targetFilePath, JSON.stringify(next, null, 2), 'utf-8')
+  await unlink(pendingCandidate.filePath).catch(() => undefined)
+
+  return {
+    sessionKey: targetSessionKey,
+    sessionName: normalizedConfirmedSessionName,
+    filePath: targetFilePath,
+    recentMessages: mergedMessages.slice(-Math.min(Math.max(limit, 1), 100))
+  }
+}
+
+async function appendRowsToStoredChatRecordFile(
+  recordsDir: string,
+  filePath: string,
+  target: { appName: string; sessionKey: string; sessionName: string },
+  rows: ChatRecordEntry[],
+  ownerUserId: string,
+  limit: number,
+  captureDedupWindowMs: number,
+  forcedTitleAliases: Array<string | null | undefined> = []
+): Promise<ChatRecordCurrentSession & { appendedCount: number }> {
+  const targetSplit = splitSessionKey(target.sessionKey)
+  const existing = await loadChatRecordFile(filePath, {
+    appName: target.appName,
+    sessionName: target.sessionName
+  })
+  const retargetedRows = retargetChatRecordEntriesToSession(rows, target.sessionKey, target.sessionName)
+  const mergedMessages = mergeRecordMessages(
+    existing.messages,
+    retargetedRows,
+    DEFAULT_WINDOW_SIZE,
+    DEFAULT_MEDIA_SIMILARITY_THRESHOLD,
+    captureDedupWindowMs
+  )
+  const appendedCount = Math.max(0, mergedMessages.length - existing.messages.length)
+  const next: ChatRecordFile = {
+    schema_version: CHAT_RECORD_SCHEMA_VERSION,
+    session_name: target.sessionName,
+    session_key: target.sessionKey,
+    app_name: target.appName,
+    canonical_title_key: normalizeSessionTitleKey(target.sessionName) || targetSplit.sessionName,
+    title_aliases: mergeForcedTitleAliases(
+      mergeTitleAliases(
+        existing.title_aliases,
+        existing.session_name,
+        rows,
+        target.sessionName,
+        normalizeSessionTitleKey(target.sessionName) || targetSplit.sessionName
+      ),
+      forcedTitleAliases
+    ),
+    confirmed_title_aliases: existing.confirmed_title_aliases ?? [],
+    owner_user_id: ownerUserId || existing.owner_user_id,
+    updated_at: new Date().toISOString(),
+    messages: mergedMessages
+  }
+  await writeFile(filePath, JSON.stringify(next, null, 2), 'utf-8')
+  return {
+    sessionKey: target.sessionKey,
+    sessionName: target.sessionName,
+    filePath,
+    appendedCount,
+    recentMessages: mergedMessages.slice(-limit)
+  }
+}
+
+async function appendRowsToPendingChatRecordFile(
+  recordsDir: string,
+  existingPending: PendingSessionCandidate | null,
+  target: {
+    appName: string
+    sessionKey: string
+    sessionName: string
+    suggestedSessionKey: string | null
+    suggestedSessionName: string | null
+  },
+  rows: ChatRecordEntry[],
+  ownerUserId: string,
+  limit: number,
+  captureDedupWindowMs: number
+): Promise<PendingChatRecordSession> {
+  const pendingId = existingPending?.pendingId || buildPendingSessionId(target)
+  const filePath = existingPending?.filePath || join(
+    getPendingSessionsRoot(recordsDir),
+    sanitizeSessionName(target.appName),
+    `${pendingId}.json`
+  )
+  await mkdir(join(getPendingSessionsRoot(recordsDir), sanitizeSessionName(target.appName)), { recursive: true })
+  const pendingFile = await loadPendingChatRecordFile(filePath, {
+    appName: target.appName,
+    sessionName: target.sessionName,
+    sessionKey: target.sessionKey,
+    pendingId,
+    suggestedSessionKey: target.suggestedSessionKey,
+    suggestedSessionName: target.suggestedSessionName
+  })
+  const mergedMessages = mergeRecordMessages(
+    pendingFile.messages,
+    rows,
+    DEFAULT_WINDOW_SIZE,
+    DEFAULT_MEDIA_SIMILARITY_THRESHOLD,
+    captureDedupWindowMs
+  )
+  const next: PendingChatRecordFile = {
+    schema_version: PENDING_CHAT_RECORD_SCHEMA_VERSION,
+    pending_id: pendingId,
+    session_name: pendingFile.session_name,
+    session_key: pendingFile.session_key,
+    app_name: pendingFile.app_name,
+    suggested_session_key: target.suggestedSessionKey ?? pendingFile.suggested_session_key ?? null,
+    suggested_session_name: target.suggestedSessionName ?? pendingFile.suggested_session_name ?? null,
+    title_aliases: mergePendingTitleAliases(
+      pendingFile.title_aliases,
+      pendingFile.session_name,
+      rows,
+      target.sessionName
+    ),
+    owner_user_id: ownerUserId || pendingFile.owner_user_id,
+    updated_at: new Date().toISOString(),
+    messages: mergedMessages
+  }
+  await writeFile(filePath, JSON.stringify(next, null, 2), 'utf-8')
+  return {
+    pendingId,
+    sessionKey: next.session_key,
+    sessionName: next.session_name,
+    filePath,
+    suggestedSessionKey: next.suggested_session_key ?? null,
+    suggestedSessionName: next.suggested_session_name ?? null,
+    recentMessages: mergedMessages.slice(-limit)
+  }
+}
+
+async function getStoredSessionCandidates(
+  recordsDir: string,
+  appName: string,
+  cache: Map<string, StoredSessionCandidate[]>,
+  options?: ChatRecordMaintenanceOptions
+): Promise<StoredSessionCandidate[]> {
+  const cached = cache.get(appName)
+  if (cached) {
+    return cached
+  }
+  const filePaths = await collectChatRecordFiles(recordsDir)
+  const candidates: StoredSessionCandidate[] = []
+  for (const filePath of filePaths) {
+    const fallback = buildFallbackSessionFromFilePath(recordsDir, filePath)
+    if (fallback.appName !== sanitizeSessionName(appName)) {
+      continue
+    }
+    const loaded = await loadChatRecordFile(filePath, fallback, options)
+    candidates.push({
+      sessionKey: loaded.session_key,
+      sessionName: loaded.session_name,
+      filePath,
+      appName: loaded.app_name,
+      canonicalTitleKey: normalizeSessionTitleKey(loaded.canonical_title_key ?? loaded.session_name),
+      titleAliases: mergeTitleAliases(
+        loaded.title_aliases,
+        loaded.session_name,
+        [],
+        loaded.session_name,
+        normalizeSessionTitleKey(loaded.session_name) || fallback.sessionName
+      ),
+      confirmedTitleAliases: normalizeConfirmedTitleAliases(loaded.confirmed_title_aliases)
+    })
+  }
+  cache.set(appName, candidates)
+  return candidates
+}
+
+async function getPendingSessionCandidates(
+  recordsDir: string,
+  appName: string,
+  cache: Map<string, PendingSessionCandidate[]>
+): Promise<PendingSessionCandidate[]> {
+  const cached = cache.get(appName)
+  if (cached) {
+    return cached
+  }
+  const filePaths = await collectPendingSessionFiles(recordsDir, appName)
+  const candidates: PendingSessionCandidate[] = []
+  for (const filePath of filePaths) {
+    const file = await loadPendingChatRecordFile(filePath)
+    candidates.push({
+      pendingId: file.pending_id,
+      sessionKey: file.session_key,
+      sessionName: file.session_name,
+      filePath,
+      appName: file.app_name,
+      suggestedSessionKey: file.suggested_session_key ?? null,
+      suggestedSessionName: file.suggested_session_name ?? null,
+      titleAliases: file.title_aliases ?? [],
+      messages: file.messages
+    })
+  }
+  cache.set(appName, candidates)
+  return candidates
+}
+
+function findBestStoredSessionMatch(
+  candidates: StoredSessionCandidate[],
+  sessionName: string
+): StoredSessionMatch | null {
+  const normalizedTitleKey = normalizeSessionTitleKey(sessionName)
+  let bestMatch: StoredSessionMatch | null = null
+
+  for (const candidate of candidates) {
+    const exact =
+      (normalizedTitleKey && candidate.canonicalTitleKey === normalizedTitleKey)
+      || candidate.titleAliases.some((alias) => normalizeSessionTitleKey(alias) === normalizedTitleKey)
+      || candidate.confirmedTitleAliases.some((alias) => normalizeSessionTitleKey(alias) === normalizedTitleKey)
+    const aliasScore = Math.max(
+      computeSessionTitleSimilarity(candidate.sessionName, sessionName),
+      ...candidate.titleAliases.map((alias) => computeSessionTitleSimilarity(alias, sessionName)),
+      0
+    )
+    const confirmedAliasScore = Math.max(
+      ...candidate.confirmedTitleAliases.map((alias) => computeSessionTitleSimilarity(alias, sessionName)),
+      0
+    )
+    const score = exact ? 1 : Math.max(aliasScore, confirmedAliasScore)
+    const eligible =
+      exact
+      || aliasScore >= SESSION_ALIAS_SIMILARITY_THRESHOLD
+      || confirmedAliasScore >= CONFIRMED_SESSION_ALIAS_SIMILARITY_THRESHOLD
+    if (!eligible) {
+      continue
+    }
+    const matchedViaConfirmedAlias =
+      !exact
+      && confirmedAliasScore >= CONFIRMED_SESSION_ALIAS_SIMILARITY_THRESHOLD
+      && confirmedAliasScore >= aliasScore
+    if (!bestMatch || score > bestMatch.score || (score === bestMatch.score && exact && !bestMatch.exact)) {
+      bestMatch = {
+        candidate,
+        score,
+        exact,
+        aliasScore,
+        confirmedAliasScore,
+        matchedViaConfirmedAlias
+      }
+    }
+  }
+
+  return bestMatch
+}
+
+function canAutoReuseStoredSessionMatch(match: StoredSessionMatch): boolean {
+  if (match.exact) {
+    return true
+  }
+  if (match.matchedViaConfirmedAlias) {
+    return match.confirmedAliasScore >= CONFIRMED_SESSION_ALIAS_SIMILARITY_THRESHOLD
+  }
+  return match.score >= SESSION_ALIAS_SIMILARITY_THRESHOLD
+    && match.candidate.titleAliases.length >= AUTO_REUSE_ALIAS_COUNT_THRESHOLD
+}
+
+function findBestPendingSessionMatch(
+  candidates: PendingSessionCandidate[],
+  sessionName: string,
+  storedMatch: StoredSessionMatch | null
+): PendingSessionCandidate | null {
+  let bestCandidate: PendingSessionCandidate | null = null
+  let bestScore = 0
+  for (const candidate of candidates) {
+    if (
+      storedMatch?.candidate.sessionKey
+      && candidate.suggestedSessionKey
+      && candidate.suggestedSessionKey !== storedMatch.candidate.sessionKey
+    ) {
+      continue
+    }
+    const score = Math.max(
+      computeSessionTitleSimilarity(candidate.sessionName, sessionName),
+      ...candidate.titleAliases.map((alias) => computeSessionTitleSimilarity(alias, sessionName)),
+      0
+    )
+    if (score >= SESSION_ALIAS_SIMILARITY_THRESHOLD && score > bestScore) {
+      bestScore = score
+      bestCandidate = candidate
+    }
+  }
+  return bestCandidate
+}
+
+async function findPendingSessionCandidateById(
+  recordsDir: string,
+  pendingId: string
+): Promise<PendingSessionCandidate | null> {
+  const filePaths = await collectPendingSessionFiles(recordsDir)
+  for (const filePath of filePaths) {
+    const file = await loadPendingChatRecordFile(filePath)
+    if (file.pending_id !== pendingId) {
+      continue
+    }
+    return {
+      pendingId: file.pending_id,
+      sessionKey: file.session_key,
+      sessionName: file.session_name,
+      filePath,
+      appName: file.app_name,
+      suggestedSessionKey: file.suggested_session_key ?? null,
+      suggestedSessionName: file.suggested_session_name ?? null,
+      titleAliases: file.title_aliases ?? [],
+      messages: file.messages
+    }
+  }
+  return null
+}
+
+function buildPendingSessionId(target: {
+  appName: string
+  sessionKey: string
+  sessionName: string
+  suggestedSessionKey: string | null
+}): string {
+  const candidateKey =
+    normalizeSessionTitleKey(target.suggestedSessionKey ? splitSessionKey(target.suggestedSessionKey).sessionName : null)
+    || normalizeSessionTitleKey(target.sessionName)
+    || sanitizeSessionName(target.sessionName)
+  return sanitizeSessionName(`${sanitizeSessionName(target.appName)}_${candidateKey}`)
+}
+
+function retargetChatRecordEntriesToSession(
+  rows: ChatRecordEntry[],
+  sessionKey: string,
+  sessionName: string
+): ChatRecordEntry[] {
+  return rows.map((row) =>
+    attachLegacyAliases(
+      {
+        ...row,
+        conversation_id: sessionKey
+      },
+      {
+        contact_name: row.sender_type === 'contact' ? sessionName : row.contact_name ?? null,
+        conversation_title: sessionName,
+        session_key: sessionKey
+      }
+    )
+  )
+}
+
+async function loadPendingChatRecordFile(
+  filePath: string,
+  fallback?: {
+    appName: string
+    sessionName: string
+    sessionKey: string
+    pendingId: string
+    suggestedSessionKey: string | null
+    suggestedSessionName: string | null
+  }
+): Promise<PendingChatRecordFile> {
+  try {
+    const raw = await readFile(filePath, 'utf-8')
+    const parsed = JSON.parse(raw) as Partial<PendingChatRecordFile>
+    if (parsed && Array.isArray(parsed.messages)) {
+      return {
+        schema_version: typeof parsed.schema_version === 'number' ? parsed.schema_version : PENDING_CHAT_RECORD_SCHEMA_VERSION,
+        pending_id: normalizeOptionalText(parsed.pending_id) || fallback?.pendingId || sanitizeSessionName('pending'),
+        session_name: normalizeConversationTitle(parsed.session_name ?? null) || fallback?.sessionName || 'unknown_session',
+        session_key: normalizeOptionalText(parsed.session_key) || fallback?.sessionKey || `${fallback?.appName ?? '微信'}::unknown_session`,
+        app_name: normalizeOptionalText(parsed.app_name) || fallback?.appName || '微信',
+        suggested_session_key: normalizeOptionalText(parsed.suggested_session_key) ?? fallback?.suggestedSessionKey ?? null,
+        suggested_session_name: normalizeConversationTitle(parsed.suggested_session_name ?? null) ?? fallback?.suggestedSessionName ?? null,
+        title_aliases: Array.isArray(parsed.title_aliases) ? parsed.title_aliases.filter((item): item is string => typeof item === 'string') : [],
+        owner_user_id: normalizeOptionalText(parsed.owner_user_id),
+        updated_at: normalizeOptionalText(parsed.updated_at) || new Date().toISOString(),
+        messages: parsed.messages
+          .map((item) => normalizeChatRecordEvent(item as unknown as ChatRecordEventRow))
+          .filter((item): item is ChatRecordEntry => item !== null)
+      }
+    }
+  } catch {
+    // ignore and fallback
+  }
+
+  if (!fallback) {
+    throw new Error('pending_fallback_required')
+  }
+
+  return {
+    schema_version: PENDING_CHAT_RECORD_SCHEMA_VERSION,
+    pending_id: fallback.pendingId,
+    session_name: fallback.sessionName,
+    session_key: fallback.sessionKey,
+    app_name: fallback.appName,
+    suggested_session_key: fallback.suggestedSessionKey,
+    suggested_session_name: fallback.suggestedSessionName,
+    title_aliases: [fallback.sessionName],
+    updated_at: new Date().toISOString(),
+    messages: []
+  }
+}
+
+async function collectPendingSessionFiles(recordsDir: string, appName?: string): Promise<string[]> {
+  const pendingRoot = getPendingSessionsRoot(recordsDir)
+  const targetRoot = appName ? join(pendingRoot, sanitizeSessionName(appName)) : pendingRoot
+  const pending = [targetRoot]
+  const result: string[] = []
+
+  while (pending.length > 0) {
+    const currentDir = pending.pop()
+    if (!currentDir) {
+      continue
+    }
+    let entries
+    try {
+      entries = await readdir(currentDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const nextPath = join(currentDir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === PENDING_SESSIONS_DIR_NAME) {
+          continue
+        }
+        pending.push(nextPath)
+        continue
+      }
+      if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+        result.push(nextPath)
+      }
+    }
+  }
+
+  return result
+}
+
+function getPendingSessionsRoot(recordsDir: string): string {
+  return join(recordsDir, PENDING_SESSIONS_DIR_NAME)
+}
+
+function computeSessionTitleSimilarity(left: string | null, right: string | null): number {
+  const a = normalizeSessionTitleKey(left)
+  const b = normalizeSessionTitleKey(right)
+  if (!a || !b) {
+    return 0
+  }
+  if (a === b) {
+    return 1
+  }
+  if (a.includes(b) || b.includes(a)) {
+    return Math.max(Math.min(a.length, b.length) / Math.max(a.length, b.length), 0.88)
+  }
+  return Math.max(computeDiceCoefficient(a, b), computeOverlapRatio(a, b))
+}
+
+function computeDiceCoefficient(left: string, right: string): number {
+  const leftBigrams = buildCharacterBigrams(left)
+  const rightBigrams = buildCharacterBigrams(right)
+  if (leftBigrams.length === 0 || rightBigrams.length === 0) {
+    return 0
+  }
+  const rightCounts = new Map<string, number>()
+  for (const item of rightBigrams) {
+    rightCounts.set(item, (rightCounts.get(item) ?? 0) + 1)
+  }
+  let matches = 0
+  for (const item of leftBigrams) {
+    const count = rightCounts.get(item) ?? 0
+    if (count <= 0) {
+      continue
+    }
+    matches += 1
+    rightCounts.set(item, count - 1)
+  }
+  return (2 * matches) / (leftBigrams.length + rightBigrams.length)
+}
+
+function computeOverlapRatio(left: string, right: string): number {
+  const shorter = left.length <= right.length ? left : right
+  const longer = shorter === left ? right : left
+  let best = 0
+  for (let start = 0; start < shorter.length; start += 1) {
+    for (let end = start + 1; end <= shorter.length; end += 1) {
+      const slice = shorter.slice(start, end)
+      if (slice.length <= best || !longer.includes(slice)) {
+        continue
+      }
+      best = slice.length
+    }
+  }
+  return best / Math.max(left.length, right.length)
+}
+
+function buildCharacterBigrams(value: string): string[] {
+  if (value.length < 2) {
+    return [value]
+  }
+  const result: string[] = []
+  for (let index = 0; index < value.length - 1; index += 1) {
+    result.push(value.slice(index, index + 2))
+  }
+  return result
+}
+
+function mergePendingTitleAliases(
+  existingAliases: string[] | undefined,
+  existingSessionName: string,
+  rows: ChatRecordEntry[],
+  displaySessionName: string
+): string[] {
+  const aliases: string[] = []
+  const seen = new Set<string>()
+  const pushAlias = (value: string | null | undefined) => {
+    const normalized = normalizeConversationTitle(value ?? null)
+    if (!normalized) {
+      return
+    }
+    const key = normalized.normalize('NFKC').toLowerCase()
+    if (seen.has(key)) {
+      return
+    }
+    seen.add(key)
+    aliases.push(normalized)
+  }
+  for (const alias of existingAliases ?? []) {
+    pushAlias(alias)
+  }
+  pushAlias(existingSessionName)
+  for (const row of rows) {
+    pushAlias(row.conversation_title ?? null)
+  }
+  pushAlias(displaySessionName)
+  return aliases
+}
+
+function mergeForcedTitleAliases(
+  existingAliases: string[] | undefined,
+  forcedAliases: Array<string | null | undefined>
+): string[] {
+  const aliases: string[] = []
+  const seen = new Set<string>()
+  const pushAlias = (value: string | null | undefined) => {
+    const normalized = normalizeConversationTitle(value ?? null)
+    if (!normalized) {
+      return
+    }
+    const key = normalized.normalize('NFKC').toLowerCase()
+    if (seen.has(key)) {
+      return
+    }
+    seen.add(key)
+    aliases.push(normalized)
+  }
+
+  for (const alias of existingAliases ?? []) {
+    pushAlias(alias)
+  }
+  for (const alias of forcedAliases) {
+    pushAlias(alias)
+  }
+  return aliases
+}
+
+function normalizeConfirmedTitleAliases(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return mergeForcedTitleAliases([], value.filter((item): item is string => typeof item === 'string'))
 }
 
 export async function repairStoredChatRecordSessions(
@@ -939,6 +1738,9 @@ async function collectChatRecordFiles(rootDir: string, _ownerUserId?: string): P
     for (const entry of entries) {
       const nextPath = join(currentDir, entry.name)
       if (entry.isDirectory()) {
+        if (entry.name === PENDING_SESSIONS_DIR_NAME) {
+          continue
+        }
         pending.push(nextPath)
         continue
       }
@@ -1057,7 +1859,11 @@ function mergeTitleAliases(
     if (!normalized) {
       return
     }
-    if (authoritativeTitleKey && normalizeSessionTitleKey(normalized) !== authoritativeTitleKey) {
+    if (
+      authoritativeTitleKey
+      && normalizeSessionTitleKey(normalized) !== authoritativeTitleKey
+      && computeSessionTitleSimilarity(normalized, displaySessionName) < SESSION_ALIAS_SIMILARITY_THRESHOLD
+    ) {
       return
     }
     const key = normalized.normalize('NFKC').toLowerCase()
@@ -1120,6 +1926,7 @@ async function loadChatRecordFile(
     app_name: fallback.appName,
     canonical_title_key: normalizeSessionTitleKey(fallback.sessionName) || fallback.sessionName,
     title_aliases: fallback.sessionName !== 'unknown_session' ? [fallback.sessionName] : [],
+    confirmed_title_aliases: [],
     updated_at: new Date().toISOString(),
     schema_version: CHAT_RECORD_SCHEMA_VERSION,
     messages: []
@@ -1971,6 +2778,7 @@ function normalizeLoadedChatRecordFile(
     sessionName,
     authoritativeTitleKey
   )
+  const normalizedConfirmedAliases = normalizeConfirmedTitleAliases(parsed.confirmed_title_aliases)
   const fileNormalizationChanged =
     normalizeOptionalText(parsed.session_name) !== sessionName
     || normalizeOptionalText(parsed.session_key) !== sessionKey
@@ -1978,6 +2786,7 @@ function normalizeLoadedChatRecordFile(
     || normalizeOptionalText(parsed.updated_at) === null
     || normalizeSessionTitleKey(normalizeOptionalText(parsed.canonical_title_key) || sessionName) !== normalizedCanonicalTitleKey
     || JSON.stringify(Array.isArray(parsed.title_aliases) ? parsed.title_aliases : []) !== JSON.stringify(normalizedTitleAliases)
+    || JSON.stringify(Array.isArray(parsed.confirmed_title_aliases) ? normalizeConfirmedTitleAliases(parsed.confirmed_title_aliases) : []) !== JSON.stringify(normalizedConfirmedAliases)
   const normalizationChanged =
     sourceNormalizationChanged
     || fileNormalizationChanged
@@ -1990,6 +2799,7 @@ function normalizeLoadedChatRecordFile(
       app_name: normalizedAppName,
       canonical_title_key: normalizedCanonicalTitleKey,
       title_aliases: normalizedTitleAliases,
+      confirmed_title_aliases: normalizedConfirmedAliases,
       owner_user_id: parsed.owner_user_id, // Preserve existing owner_user_id
       updated_at: normalizeOptionalText(parsed.updated_at) || new Date().toISOString(),
       schema_version: typeof parsed.schema_version === 'number' ? parsed.schema_version : CHAT_RECORD_SCHEMA_VERSION,

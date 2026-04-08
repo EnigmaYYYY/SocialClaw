@@ -32,8 +32,8 @@ const MAIN_WINDOW_DEFAULTS = {
 
 const ASSISTANT_WINDOW_DEFAULTS = {
   collapsedSize: 80,
-  expandedWidth: 308,
-  expandedHeight: 340,
+  expandedWidth: 344,
+  expandedHeight: 388,
   margin: 16
 } as const
 

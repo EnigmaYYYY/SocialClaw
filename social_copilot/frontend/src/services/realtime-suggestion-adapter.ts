@@ -19,6 +19,16 @@ export interface RealtimeSuggestionUpdate {
   timestamp: number
 }
 
+export interface PendingSessionConfirmationUpdate {
+  pendingId: string
+  sessionKey: string
+  sessionName: string
+  suggestedSessionKey: string | null
+  suggestedSessionName: string | null
+  recentMessages: SuggestionMessage[]
+  timestamp: number
+}
+
 export interface RealtimeSuggestionDebugState {
   baseUrl: string
   monitorRunning: boolean
@@ -144,6 +154,7 @@ export class RealtimeSuggestionAdapter {
   private currentContactCacheKey: string | null = null
   private sessionRounds = new Map<string, SessionRoundState>()
   private onSuggestionsCallback: ((update: RealtimeSuggestionUpdate) => void) | null = null
+  private onPendingSessionConfirmationCallback: ((update: PendingSessionConfirmationUpdate) => void) | null = null
   private onStatusCallback: ((status: AdapterStatus) => void) | null = null
   private onErrorCallback: ((message: string) => void) | null = null
   private onDebugCallback: ((state: RealtimeSuggestionDebugState) => void) | null = null
@@ -175,6 +186,10 @@ export class RealtimeSuggestionAdapter {
 
   onSuggestions(callback: (update: RealtimeSuggestionUpdate) => void): void {
     this.onSuggestionsCallback = callback
+  }
+
+  onPendingSessionConfirmation(callback: (update: PendingSessionConfirmationUpdate) => void): void {
+    this.onPendingSessionConfirmationCallback = callback
   }
 
   onStatus(callback: (status: AdapterStatus) => void): void {
@@ -373,6 +388,50 @@ export class RealtimeSuggestionAdapter {
         frame_id: row.metadata.frame_id ?? null
       },
     }))
+    await this.maybeRequestSuggestions(baseUrl, sessionKey)
+  }
+
+  async confirmPendingSession(pendingId: string, confirmedSessionName: string): Promise<void> {
+    if (!this.running || !this.suggestionsEnabled || !this.settings) {
+      return
+    }
+    const snapshot = await window.electronAPI.chatRecords.confirmPendingSession(pendingId, confirmedSessionName, 10)
+    const sessionKey = snapshot.sessionKey
+    this.currentSessionKey = sessionKey
+    this.currentContactName = snapshot.sessionName
+    this.currentContactCacheKey = this.buildCanonicalContactCacheKey()
+    this.patchDebug({
+      lastSessionName: snapshot.sessionName,
+      lastChatRecordFilePath: snapshot.filePath
+    })
+
+    const gate = this.ensureSessionRound(sessionKey)
+    gate.awaitingUserAction = false
+    gate.pendingRecentMessages = snapshot.recentMessages.map((row) => ({
+      message_id: row.message_id,
+      conversation_id: row.conversation_id,
+      sender_id: row.sender_id,
+      sender_name: row.sender_name,
+      sender_type: row.sender_type,
+      content: row.content,
+      timestamp: row.timestamp ?? null,
+      content_type: row.content_type ?? null,
+      reply_to: row.reply_to ?? null,
+      quoted_message: row.quoted_message ?? null,
+      metadata: {
+        window_id: row.metadata.window_id ?? null,
+        non_text_description: row.metadata.non_text_description ?? null,
+        event_id: row.metadata.event_id ?? null,
+        frame_id: row.metadata.frame_id ?? null
+      }
+    }))
+    this.onSuggestionsCallback?.({
+      suggestions: [],
+      contactName: snapshot.sessionName,
+      sessionKey: snapshot.sessionKey,
+      timestamp: Date.now()
+    })
+    const baseUrl = this.settings.visualMonitor.apiBaseUrl?.trim() || 'http://127.0.0.1:18777'
     await this.maybeRequestSuggestions(baseUrl, sessionKey)
   }
 
@@ -740,6 +799,45 @@ export class RealtimeSuggestionAdapter {
 
   private async ingestEventsIntoChatRecords(events: VisualMonitorEventRow[]): Promise<void> {
     const persisted = await window.electronAPI.chatRecords.ingestAndGetRecent(events, 10)
+    if (persisted.pendingConfirmation) {
+      if (this.currentSessionKey) {
+        this.clearRoundForSession(this.currentSessionKey)
+      }
+      this.currentSessionKey = null
+      this.currentContactName = null
+      this.currentContactCacheKey = null
+      this.patchDebug({
+        lastSessionName: persisted.pendingConfirmation.sessionName,
+        lastChatRecordFilePath: persisted.pendingConfirmation.filePath
+      })
+      this.onPendingSessionConfirmationCallback?.({
+        pendingId: persisted.pendingConfirmation.pendingId,
+        sessionKey: persisted.pendingConfirmation.sessionKey,
+        sessionName: persisted.pendingConfirmation.sessionName,
+        suggestedSessionKey: persisted.pendingConfirmation.suggestedSessionKey,
+        suggestedSessionName: persisted.pendingConfirmation.suggestedSessionName,
+        recentMessages: persisted.pendingConfirmation.recentMessages.map((row) => ({
+          message_id: row.message_id,
+          conversation_id: row.conversation_id,
+          sender_id: row.sender_id,
+          sender_name: row.sender_name,
+          sender_type: row.sender_type,
+          content: row.content,
+          timestamp: row.timestamp ?? null,
+          content_type: row.content_type ?? null,
+          reply_to: row.reply_to ?? null,
+          quoted_message: row.quoted_message ?? null,
+          metadata: {
+            window_id: row.metadata.window_id ?? null,
+            non_text_description: row.metadata.non_text_description ?? null,
+            event_id: row.metadata.event_id ?? null,
+            frame_id: row.metadata.frame_id ?? null
+          }
+        })),
+        timestamp: Date.now()
+      })
+      return
+    }
     const suggestionSession = persisted.latestUpdatedSession ?? persisted.currentSession
     if (!suggestionSession) {
       return

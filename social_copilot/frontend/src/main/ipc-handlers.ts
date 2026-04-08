@@ -32,6 +32,7 @@ import { ProfilerAgent } from '../agents/profiler-agent'
 import { AgentOrchestrator, OrchestrationResult } from '../agents/orchestrator'
 import { UnifiedProfile, AppSettings } from '../models/schemas'
 import {
+  confirmPendingChatRecordSession,
   deleteStoredChatRecordSession,
   ingestChatRecordsAndGetRecent,
   loadRecentChatRecordSession,
@@ -394,6 +395,7 @@ export function registerIpcHandlers(): void {
   // Chat records handlers (chatrecords:*)
   ipcMain.handle('chatrecords:ingestAndGetRecent', handleChatRecordsIngestAndGetRecent)
   ipcMain.handle('chatrecords:getRecentSessionMessages', handleChatRecordsGetRecentSessionMessages)
+  ipcMain.handle('chatrecords:confirmPendingSession', handleChatRecordsConfirmPendingSession)
 
   // Memory file handlers (memoryfiles:*)
   ipcMain.handle('memoryfiles:getOverview', handleMemoryFilesGetOverview)
@@ -475,6 +477,7 @@ export function unregisterIpcHandlers(): void {
   ipcMain.removeHandler('hotrun:updateSettings')
   ipcMain.removeHandler('chatrecords:ingestAndGetRecent')
   ipcMain.removeHandler('chatrecords:getRecentSessionMessages')
+  ipcMain.removeHandler('chatrecords:confirmPendingSession')
   ipcMain.removeHandler('memoryfiles:getOverview')
   ipcMain.removeHandler('memoryfiles:getSection')
   ipcMain.removeHandler('memoryfiles:readItem')
@@ -1922,7 +1925,10 @@ async function handleChatRecordsIngestAndGetRecent(
     ownerUserId,
     ownerDisplayName,
     limit,
-    getChatRecordMaintenanceOptions(settings)
+    {
+      ...getChatRecordMaintenanceOptions(settings),
+      sessionConfirmationMode: 'realtime'
+    }
   )
 
   // Mark updated sessions as dirty for memory files refresh
@@ -1949,6 +1955,29 @@ async function handleChatRecordsGetRecentSessionMessages(
     sessionKey,
     limit,
     getChatRecordMaintenanceOptions(settings)
+  )
+}
+
+async function handleChatRecordsConfirmPendingSession(
+  _event: Electron.IpcMainInvokeEvent,
+  pendingId: string,
+  confirmedSessionName: string,
+  limit: number = 10
+): Promise<{ sessionKey: string; sessionName: string; filePath: string; recentMessages: ChatRecordEntry[] }> {
+  const settings = await memoryManager.loadSettings()
+  const ownerUserId = settings.evermemos.ownerUserId
+  const ownerDisplayName = getOwnerDisplayName(settings)
+  return confirmPendingChatRecordSession(
+    settings.storagePaths.chatRecordsDir,
+    pendingId,
+    confirmedSessionName,
+    ownerUserId,
+    ownerDisplayName,
+    limit,
+    {
+      ...getChatRecordMaintenanceOptions(settings),
+      sessionConfirmationMode: 'realtime'
+    }
   )
 }
 

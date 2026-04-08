@@ -373,11 +373,13 @@ Re-authenticate: `cliproxyapi --claude-login`, then restart the service.
 
 **Q: Can EverMemOS running in Docker access CLIProxyAPI on the host?**
 
-Yes. In `memory/evermemos/.env`, use `host.docker.internal` instead of `127.0.0.1`:
+Yes. If the EverMemOS API itself is running inside Docker, use `host.docker.internal` instead of `127.0.0.1`:
 
 ```bash
 LLM_BASE_URL=http://host.docker.internal:8317/v1
 ```
+
+If you use the default SocialClaw startup scripts, EverMemOS runs on the host, so keep `127.0.0.1`.
 
 ### Model Configuration
 

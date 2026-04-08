@@ -98,8 +98,12 @@ cd memory/evermemos
 
 # Copy EverMemOS config if not already done
 cp env.template .env
-# Edit .env — at minimum set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
-# If running services locally, change host.docker.internal → 127.0.0.1
+# Edit .env — at minimum set LLM_MODEL and any required API keys.
+# The template already matches the default SocialClaw startup mode:
+# - EverMemOS API runs on the host
+# - MongoDB / Redis / Elasticsearch / Milvus stay in Docker and are reached via localhost-mapped ports
+# If you run the EverMemOS API inside Docker instead, switch datastore hosts back to
+# docker-compose service names and local model endpoints to host.docker.internal.
 
 uv sync
 uv run python src/run.py --host 127.0.0.1 --port 1995

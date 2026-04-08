@@ -710,6 +710,16 @@ export interface ChatRecordCurrentSession {
   recentMessages: ChatRecordEntry[]
 }
 
+export interface PendingChatRecordSession {
+  pendingId: string
+  sessionKey: string
+  sessionName: string
+  filePath: string
+  suggestedSessionKey: string | null
+  suggestedSessionName: string | null
+  recentMessages: ChatRecordEntry[]
+}
+
 export interface ChatRecordUpdatedSession {
   sessionKey: string
   sessionName: string
@@ -721,11 +731,13 @@ export interface ChatRecordIngestResult {
   currentSession: ChatRecordCurrentSession
   latestUpdatedSession: ChatRecordCurrentSession | null
   updatedSessions: ChatRecordUpdatedSession[]
+  pendingConfirmation: PendingChatRecordSession | null
 }
 
 export interface ChatRecordsAPI {
   ingestAndGetRecent: (events: ChatRecordEventRow[], limit?: number) => Promise<ChatRecordIngestResult>
   getRecentSessionMessages: (sessionKey: string, limit?: number) => Promise<ChatRecordCurrentSession | null>
+  confirmPendingSession: (pendingId: string, confirmedSessionName: string, limit?: number) => Promise<ChatRecordCurrentSession>
 }
 
 export interface MemoryFilesAPI {
@@ -1239,7 +1251,14 @@ const chatRecordsAPI: ChatRecordsAPI = {
     ipcRenderer.invoke('chatrecords:ingestAndGetRecent', events, limit),
 
   getRecentSessionMessages: (sessionKey: string, limit: number = 10): Promise<ChatRecordCurrentSession | null> =>
-    ipcRenderer.invoke('chatrecords:getRecentSessionMessages', sessionKey, limit)
+    ipcRenderer.invoke('chatrecords:getRecentSessionMessages', sessionKey, limit),
+
+  confirmPendingSession: (
+    pendingId: string,
+    confirmedSessionName: string,
+    limit: number = 10
+  ): Promise<ChatRecordCurrentSession> =>
+    ipcRenderer.invoke('chatrecords:confirmPendingSession', pendingId, confirmedSessionName, limit)
 }
 
 const memoryFilesAPI: MemoryFilesAPI = {
@@ -1379,5 +1398,4 @@ declare global {
     electronAPI: ElectronAPI
   }
 }
-
 

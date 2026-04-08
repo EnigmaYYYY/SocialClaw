@@ -1,7 +1,8 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   RealtimeSuggestionAdapter,
-  type AdapterStatus
+  type AdapterStatus,
+  type PendingSessionConfirmationUpdate
 } from '../../../services/realtime-suggestion-adapter'
 import {
   buildPetViewModel,
@@ -35,12 +36,53 @@ interface SuggestionViewItem extends PetSuggestion {
   timeLabel: string
 }
 
+interface PendingSessionConfirmationView extends PendingSessionConfirmationUpdate {
+  inputValue: string
+}
+
+const SUGGESTION_CARD_ACTION_LABELS = {
+  copy: '复制',
+  regenerate: '重新生成',
+  skip: '跳过',
+  expand: '展开'
+} as const
+
+const ENABLE_FOREGROUND_PROMPT_AUTO_OPEN = true
+
 export function resolveSurfacePreferenceForAssistantActivation(hasSuggestions: boolean): SurfacePreference {
   return hasSuggestions ? 'auto' : 'folio'
 }
 
 export function shouldShowSuggestionCardShortcut(hasSuggestions: boolean): boolean {
   return hasSuggestions
+}
+
+export function getVisibleSuggestionCardSuggestions<T>(suggestions: T[], limit = 3): T[] {
+  return suggestions.slice(0, limit)
+}
+
+export function getSuggestionCardActionLabels(): typeof SUGGESTION_CARD_ACTION_LABELS {
+  return SUGGESTION_CARD_ACTION_LABELS
+}
+
+export function shouldAutoExpandForSuggestionUpdate(suggestionCount: number): boolean {
+  return suggestionCount > 0
+}
+
+export function shouldAutoOpenPromptForForegroundApp(
+  currentAppName: string | null,
+  suggestionEnabled: boolean,
+  lastPromptedApp: string | null
+): boolean {
+  if (!ENABLE_FOREGROUND_PROMPT_AUTO_OPEN) {
+    return false
+  }
+
+  if (!currentAppName || suggestionEnabled) {
+    return false
+  }
+
+  return lastPromptedApp !== currentAppName
 }
 
 export function resolveAssistantActivationIntent(
@@ -514,6 +556,7 @@ export function AssistantBubbleApp(): JSX.Element {
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(0)
   const [currentContact, setCurrentContact] = useState<string | null>(null)
   const [currentSessionKey, setCurrentSessionKey] = useState<string | null>(null)
+  const [pendingSessionConfirmation, setPendingSessionConfirmation] = useState<PendingSessionConfirmationView | null>(null)
   const [frontmostAppName, setFrontmostAppName] = useState<string | null>(null)
   const [frontmostGatePassed, setFrontmostGatePassed] = useState<boolean | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -544,7 +587,12 @@ export function AssistantBubbleApp(): JSX.Element {
     () => reorderSuggestions(suggestions, highlightedSuggestionIndex),
     [highlightedSuggestionIndex, suggestions]
   )
+  const visibleSuggestionCards = useMemo(
+    () => getVisibleSuggestionCardSuggestions(suggestions),
+    [suggestions]
+  )
   const activeSuggestion = orderedSuggestions[0]
+  const suggestionCardActionLabels = getSuggestionCardActionLabels()
   const currentAppName = useMemo(
     () => inferAppName(currentSessionKey, currentContact, frontmostAppName),
     [currentContact, currentSessionKey, frontmostAppName]
@@ -838,12 +886,50 @@ export function AssistantBubbleApp(): JSX.Element {
     await syncExpandedState(true)
   }, [syncExpandedState])
 
-  const cycleSuggestion = useCallback(() => {
-    if (suggestions.length < 2) {
+  const regenerateSuggestions = useCallback(async (): Promise<void> => {
+    const adapter = adapterRef.current
+    if (!adapter) {
       return
     }
-    setHighlightedSuggestionIndex((index) => (index + 1) % suggestions.length)
-  }, [suggestions.length])
+    setSuggestions([])
+    setErrorMessage(null)
+    await adapter.rerollCurrentRound()
+  }, [])
+
+  const postponePendingSessionConfirmation = useCallback(async (): Promise<void> => {
+    setPendingSessionConfirmation(null)
+    await collapseToPet()
+  }, [collapseToPet])
+
+  const submitPendingSessionConfirmation = useCallback(async () => {
+    const adapter = adapterRef.current
+    if (!adapter || !pendingSessionConfirmation) {
+      return
+    }
+    const confirmedSessionName = pendingSessionConfirmation.inputValue.trim()
+    if (!confirmedSessionName) {
+      setErrorMessage('请先确认或修正会话名称')
+      return
+    }
+    setErrorMessage(null)
+    setPendingSessionConfirmation(null)
+    await collapseToPet()
+    await adapter.confirmPendingSession(pendingSessionConfirmation.pendingId, confirmedSessionName)
+  }, [collapseToPet, pendingSessionConfirmation])
+
+  const confirmSuggestedPendingSession = useCallback(async () => {
+    const adapter = adapterRef.current
+    if (!adapter || !pendingSessionConfirmation?.suggestedSessionName) {
+      return
+    }
+    setErrorMessage(null)
+    setPendingSessionConfirmation(null)
+    await collapseToPet()
+    await adapter.confirmPendingSession(
+      pendingSessionConfirmation.pendingId,
+      pendingSessionConfirmation.suggestedSessionName
+    )
+  }, [collapseToPet, pendingSessionConfirmation])
 
   useEffect(() => {
     if (suggestions.length === 0 && highlightedSuggestionIndex !== 0) {
@@ -880,6 +966,24 @@ export function AssistantBubbleApp(): JSX.Element {
       setFrontmostAppName(debugState.monitorLastFrontmostApp || null)
       setFrontmostGatePassed(debugState.monitorLastGatePassed)
     })
+    adapter.onPendingSessionConfirmation((pending) => {
+      if (disposed) {
+        return
+      }
+      setSuggestionEnabled(true)
+      setPromptVisible(false)
+      setSuggestions([])
+      setHighlightedSuggestionIndex(0)
+      setErrorMessage(null)
+      setCurrentContact(pending.sessionName)
+      setCurrentSessionKey(null)
+      setSurfacePreference('auto')
+      setPendingSessionConfirmation({
+        ...pending,
+        inputValue: pending.suggestedSessionName ?? pending.sessionName
+      })
+      void syncExpandedState(true)
+    })
     adapter.onSuggestions((update) => {
       if (disposed) {
         return
@@ -893,14 +997,22 @@ export function AssistantBubbleApp(): JSX.Element {
       }))
 
       setSuggestionEnabled(true)
-      setPromptVisible(false)
-      setSurfacePreference('auto')
       setHighlightedSuggestionIndex(0)
       setErrorMessage(null)
       setCurrentContact(update.contactName)
       setCurrentSessionKey(update.sessionKey)
+      if (mappedSuggestions.length === 0) {
+        setPendingSessionConfirmation(null)
+        setSuggestions([])
+        return
+      }
+      setPendingSessionConfirmation(null)
+      setPromptVisible(false)
+      setSurfacePreference('auto')
       setSuggestions(mappedSuggestions)
-      void syncExpandedState(true)
+      if (shouldAutoExpandForSuggestionUpdate(mappedSuggestions.length)) {
+        void syncExpandedState(true)
+      }
     })
     void window.electronAPI.assistantWindow.getBounds().then((bounds) => {
       if (!disposed && bounds) {
@@ -967,10 +1079,7 @@ export function AssistantBubbleApp(): JSX.Element {
   }, [suggestionEnabled])
 
   useEffect(() => {
-    if (!currentAppName || suggestionEnabled) {
-      return
-    }
-    if (lastPromptedAppRef.current === currentAppName) {
+    if (!shouldAutoOpenPromptForForegroundApp(currentAppName, suggestionEnabled, lastPromptedAppRef.current)) {
       return
     }
 
@@ -1098,12 +1207,67 @@ export function AssistantBubbleApp(): JSX.Element {
     syncExpandedState
   ])
 
-  const showWhisperStage = expanded && petView.surfaceMode === 'whispers' && Boolean(activeSuggestion)
-  const showPromptStage = expanded && promptVisible && !activeSuggestion && surfacePreference === 'auto'
-  const showFolioStage = expanded && !showWhisperStage && !showPromptStage
+  const showPendingStage = expanded && Boolean(pendingSessionConfirmation)
+  const showWhisperStage = expanded && !showPendingStage && petView.surfaceMode === 'whispers' && Boolean(activeSuggestion)
+  const showPromptStage = expanded && !showPendingStage && promptVisible && !activeSuggestion && surfacePreference === 'auto'
+  const showFolioStage = expanded && !showPendingStage && !showWhisperStage && !showPromptStage
 
   return (
     <main className={`assistant-shell tone-${petView.accentTone} surface-${petView.surfaceMode}`}>
+      {showPendingStage && pendingSessionConfirmation && (
+        <section className="assistant-pending-stage" aria-label="会话名称确认">
+          <article className="assistant-pending-card">
+            <header className="assistant-note-meta">
+              <span className="assistant-tone-chip">会话确认</span>
+              <span className="assistant-context-chip">先确认再归档</span>
+            </header>
+            <p className="assistant-whisper-copy">
+              识别到的会话名是“{pendingSessionConfirmation.sessionName}”。
+            </p>
+            <p className="assistant-whisper-reason">
+              {pendingSessionConfirmation.suggestedSessionName
+                ? `已匹配到一个高相似候选：${pendingSessionConfirmation.suggestedSessionName}。确认后会把缓存消息归并进对应聊天记录。`
+                : '这批消息先进入临时缓存，确认后才会写入正式聊天记录文件。'}
+            </p>
+            <label className="assistant-pending-field">
+              <span>确认后的会话名称</span>
+              <input
+                type="text"
+                value={pendingSessionConfirmation.inputValue}
+                onChange={(event) =>
+                  setPendingSessionConfirmation((current) => (
+                    current
+                      ? {
+                        ...current,
+                        inputValue: event.target.value
+                      }
+                      : current
+                  ))
+                }
+                placeholder="输入最终会话名称"
+              />
+            </label>
+            <footer className="assistant-whisper-footer">
+              <div className="assistant-inline-actions">
+                <button type="button" onClick={() => void submitPendingSessionConfirmation()}>
+                  确认
+                </button>
+                <button
+                  type="button"
+                  disabled={!pendingSessionConfirmation.suggestedSessionName}
+                  onClick={() => void confirmSuggestedPendingSession()}
+                >
+                  保存更正
+                </button>
+                <button type="button" onClick={() => void postponePendingSessionConfirmation()}>
+                  稍后
+                </button>
+              </div>
+            </footer>
+          </article>
+        </section>
+      )}
+
       {showWhisperStage && activeSuggestion && (
         <section className="assistant-whisper-stage" aria-label="建议卡片">
           <article className="assistant-whisper-card">
@@ -1112,23 +1276,34 @@ export function AssistantBubbleApp(): JSX.Element {
               <span className="assistant-context-chip">{petView.contextLabel}</span>
             </header>
 
-            <p className="assistant-whisper-copy">{petView.headline}</p>
-            <p className="assistant-whisper-reason">{petView.subheadline}</p>
+            <div className="assistant-whisper-suggestion-list">
+              {visibleSuggestionCards.map((suggestion) => (
+                <section key={suggestion.id} className="assistant-whisper-suggestion">
+                  <div className="assistant-whisper-suggestion-meta">
+                    <span className="assistant-ledger-chip">{suggestion.toneLabel}</span>
+                    <span className="assistant-whisper-time">{suggestion.timeLabel}</span>
+                  </div>
+                  <p className="assistant-whisper-copy">{suggestion.content}</p>
+                  <p className="assistant-whisper-reason">{suggestion.reason}</p>
+                  <div className="assistant-inline-actions assistant-whisper-actions">
+                    <button type="button" onClick={() => void copySuggestion(suggestion.content)}>
+                      {suggestionCardActionLabels.copy}
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
 
             <footer className="assistant-whisper-footer">
-              <span className="assistant-whisper-time">{activeSuggestion.timeLabel}</span>
               <div className="assistant-inline-actions">
-                <button type="button" onClick={() => void copySuggestion(activeSuggestion.content)}>
-                  复制
-                </button>
-                <button type="button" onClick={cycleSuggestion} disabled={orderedSuggestions.length < 2}>
-                  换一句
+                <button type="button" onClick={() => void regenerateSuggestions()}>
+                  {suggestionCardActionLabels.regenerate}
                 </button>
                 <button type="button" onClick={() => void skipCurrentRound()}>
-                  Skip
+                  {suggestionCardActionLabels.skip}
                 </button>
                 <button type="button" onClick={() => void openFolio()}>
-                  展开
+                  {suggestionCardActionLabels.expand}
                 </button>
               </div>
             </footer>
@@ -1210,8 +1385,8 @@ export function AssistantBubbleApp(): JSX.Element {
                       <h3>这一轮的候选说法</h3>
                     </div>
                     <div className="assistant-inline-actions">
-                      <button type="button" className="assistant-link-button" onClick={cycleSuggestion}>
-                        换一句
+                      <button type="button" className="assistant-link-button" onClick={() => void regenerateSuggestions()}>
+                        {suggestionCardActionLabels.regenerate}
                       </button>
                       {shouldShowSuggestionCardShortcut(Boolean(activeSuggestion)) && (
                         <button type="button" className="assistant-link-button" onClick={() => void openSuggestionCard()}>
@@ -1284,13 +1459,13 @@ export function AssistantBubbleApp(): JSX.Element {
 
           <footer className="assistant-folio-footer">
             <button type="button" onClick={() => activeSuggestion && void copySuggestion(activeSuggestion.content)} disabled={!activeSuggestion}>
-              复制当前句
+              复制当前
             </button>
             <button type="button" onClick={() => void openSuggestionCard()} disabled={!activeSuggestion}>
-              查看建议卡片
+              建议卡片
             </button>
             <button type="button" onClick={() => void skipCurrentRound()} disabled={!activeSuggestion}>
-              本轮先略过
+              略过本轮
             </button>
             <button type="button" onClick={() => void stopAssistant()}>
               停止监控
@@ -1334,4 +1509,3 @@ export function AssistantBubbleApp(): JSX.Element {
     </main>
   )
 }
-
