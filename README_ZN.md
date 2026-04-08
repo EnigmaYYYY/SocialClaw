@@ -1,6 +1,10 @@
+<div align="center">
+
 # SocialClaw
 
-[English README](./README.md)
+[中文主版](./README.md) | [English README](./README_EN.md)
+
+</div>
 
 SocialClaw 是一个“看得见聊天界面”的 AI 社交副驾。它会直接观察聊天窗口、构建个性化记忆与画像，并在真实对话过程中实时给出更贴近上下文的回复建议。
 
