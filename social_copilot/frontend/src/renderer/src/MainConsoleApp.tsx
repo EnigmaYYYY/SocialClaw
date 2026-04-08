@@ -658,7 +658,7 @@ export function MainConsoleApp(): JSX.Element {
     <div className="console-shell">
       <aside className="console-sidebar">
         <div className="console-brand">
-          <p>Social Copilot</p>
+          <p>SocialClaw</p>
           <h1>记忆文件</h1>
         </div>
 
@@ -1039,7 +1039,7 @@ export function MainConsoleApp(): JSX.Element {
                     }))
                   }
                 >
-                  <option value="disabled">关闭（仅原 Social Copilot）</option>
+                  <option value="disabled">关闭（仅原 SocialClaw）</option>
                   <option value="enabled">开启（失败自动回退）</option>
                 </select>
               </div>

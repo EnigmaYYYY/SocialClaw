@@ -1771,6 +1771,7 @@ class VisualMonitorPipeline:
             return None
         title = self._chat_unread_suffix_pattern.sub("", title).strip()
         title = re.sub(r"\s+-\s*(\u5fae\u4fe1|wechat)\s*$", "", title, flags=re.IGNORECASE).strip()
+        title = re.sub(r"\s+ai\s*$", "", title, flags=re.IGNORECASE).strip()
         if not title:
             return None
         lower = title.lower()

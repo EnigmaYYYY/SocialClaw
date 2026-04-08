@@ -212,7 +212,7 @@ function App(): JSX.Element {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Social Copilot - AI 社交军师</h1>
+        <h1>SocialClaw - AI 社交军师</h1>
         <div className="header-actions">
           <button
             type="button"

@@ -163,12 +163,12 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   const renderWelcomeStep = (): JSX.Element => (
     <div className="onboarding-step welcome-step">
       <div className="welcome-icon">🤖</div>
-      <h1>欢迎使用 Social Copilot</h1>
+      <h1>欢迎使用 SocialClaw</h1>
       <h2>AI 社交军师</h2>
       
       <div className="welcome-description">
         <p>
-          Social Copilot 是一款智能聊天助手，通过分析您的聊天风格和好友关系，
+          SocialClaw 是一款智能聊天助手，通过分析您的聊天风格和好友关系，
           为您提供高情商的回复建议。
         </p>
         

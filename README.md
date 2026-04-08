@@ -1,341 +1,393 @@
+# SocialClaw
 
-AI-powered social copilot that watches your chat screens, builds memory profiles, and suggests replies in real time.
+[中文版本](./README_ZN.md)
 
-## What It Does
+SocialClaw is a screen-aware social copilot that watches live chat windows, builds personalized memory and profile context, and suggests replies in real time.
 
-SocialClaw sits alongside your messaging apps (WeChat, etc.) and provides three capabilities:
+If this project is useful to you, a star helps a lot.
 
-1. **Screen Monitoring** — Continuously captures and detects chat screen changes via VLM (Vision Language Model), extracting structured messages in real time
-2. **Memory & Profile System** — Builds and maintains long-term memory, contact profiles, episodic summaries, and predictive insights from your conversations via EverMemOS
-3. **Reply Suggestions** — Generates context-aware reply suggestions using your conversation history, contact profiles, and memory context
+## Why SocialClaw
 
-## Architecture
+SocialClaw is not just a reply generator.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Visual Monitor (VLM Process)                           │
-│  Screen Capture (1-5 FPS) → Change Detection → VLM     │
-│  → Structured Messages → Event Bus (SQLite)             │
-└────────────────────────┬────────────────────────────────┘
-                         │ Frontend polls /events/poll
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Electron Frontend (Coordinator)                        │
-│                                                         │
-│  New messages detected →                                │
-│    1. Call EverMemOS /process-chat (memory sync)        │
-│    2. Call /assistant/suggestions (reply generation)     │
-│                                                         │
-│  Gating: skips if previous round in-flight or           │
-│          awaiting user action                           │
-└──────────┬──────────────────────────────┬───────────────┘
-           │                              │
-           ▼                              ▼
-┌──────────────────────┐   ┌──────────────────────────────┐
-│  EverMemOS           │   │  Reply Suggestion            │
-│  POST /process-chat  │   │  /assistant/suggestions      │
-│                      │   │                              │
-│  Parallel execution: │   │  Try EverMemOS reply API     │
-│  ├ Memory sync       │   │  → fallback to local model   │
-│  └ Profile update    │   │                              │
-│  ↓ (after sync)      │   │                              │
-│  Reply suggestion    │   │                              │
-└──────────────────────┘   └──────────────────────────────┘
-```
+It combines:
 
-**Key design decisions:**
-- Memory sync and profile detection run **in parallel** (via `asyncio.create_task`)
-- Memory sync has 60s timeout protection, reply suggestion has 30s timeout
-- LLM calls are globally rate-limited via `asyncio.Semaphore` (default 5 concurrent)
-- Visual Monitor → EverMemOS message format is auto-converted
+- live screen understanding from chat windows
+- personalized memory and profile construction
+- reply suggestions grounded in user style, contact context, and remembered events
+- built-in and extensible persona skills for style-controlled guidance
 
-## Prerequisites
+The goal is simple: make social suggestions feel more personal, more contextual, and more usable in real conversations.
 
-| Dependency | Version | Notes |
-|-----------|---------|-------|
-| Python | 3.12 | EverMemOS requires >=3.12,<3.13 |
-| Node.js | >=20 | Electron frontend |
-| Docker | Latest | For EverMemOS data stores |
-| Conda or uv | Any | Python environment management |
+In an era where AI assistants are everywhere, the goal of SocialClaw is not to replace the user.
 
-**LLM services you need:**
-- A chat completion API (OpenAI-compatible) for memory extraction, profile building, and reply generation
-- A VLM API for screenshot-to-text recognition
-- An embedding API for vector search (e.g., local Ollama with nomic-embed-text)
-- A rerank API (e.g., SiliconFlow with BAAI/bge-reranker-v2-m3)
+Instead, it is designed to help users improve themselves:
+
+- it does not try to automatically send replies on the user's behalf
+- it assists through suggestions instead of silent replacement
+- it explains why certain replies are more suitable
+- over time, it aims to improve the user's own communication judgment and habits
+
+## What Makes It Different
+
+### Personalized Memory And Profile System
+
+SocialClaw builds both **user-side** and **contact-side** profile context from chat history.
+
+That includes:
+
+- user speaking habits and response style
+- contact identity, traits, and preferences
+- remembered events and relationship context
+- long-term memory used during suggestion generation
+
+This matters because better suggestions do not only come from the latest message. They come from knowing how you usually speak, who the other person is, and what has already happened between you.
+
+### Built-In And Extensible Persona Skills
+
+Persona skills are a first-class part of SocialClaw.
+
+The app already includes a set of built-in persona skills, and users can upload or create their own custom skills to shape how suggestions are written.
+
+Typical use cases include:
+
+- creating mentor-style guidance
+- simulating a manager or colleague communication style
+- adding a custom social tone for different contexts
+- testing multiple reply styles against the same conversation
+
+This makes SocialClaw more than a generic assistant. It becomes a controllable social strategy layer.
+
+### Screen-Aware, Real-Time Suggestions
+
+SocialClaw does not rely on platform webhooks. It watches the actual chat UI, uses a VLM to turn screenshots into structured messages, and then drives memory sync plus suggestion generation from those events.
+
+### OpenAI-Compatible And Proxy-Friendly
+
+Assistant, VLM, and memory-side model calls are designed around OpenAI-compatible APIs. This makes it easy to plug in hosted providers, self-hosted gateways, or proxies such as CLIProxyAPI.
+
+## Privacy And Local-First Design
+
+SocialClaw is designed around local ownership of data.
+
+Chat record files, memory artifacts, profile data, and runtime caches are intended to stay on the user's machine by default.
+
+That makes the project better suited to:
+
+- privacy-sensitive workflows
+- local experimentation
+- users who want direct control over their files and data lifecycle
+
+Final privacy boundaries still depend on which model providers or proxies you connect, but the project itself is built around local storage rather than centralized hosting.
+
+## Core Capabilities
+
+| Capability | What you get |
+| --- | --- |
+| Screen-aware monitoring | Detects chat-window changes and extracts structured messages from screenshots |
+| Personalized memory and profiles | Builds user memory, contact memory, profile updates, and retrieval context |
+| Real-time reply suggestions | Generates grounded reply candidates from current chat context and long-term memory |
+| Persona skill enhancement | Applies built-in or custom persona skills to shape suggestion style and strategy |
+| Old chat import and backfill | Imports historical chat data and rebuilds memory from local records |
+| Operator-facing controls | UI settings for models, stream strategy, memory operations, and monitoring flow |
+
+## Best-Fit Scenarios
+
+SocialClaw currently works best when:
+
+- replies do not need to be ultra-fast
+- the conversation benefits from a bit of thought and wording control
+- memory, relationship context, and style actually matter
+
+Typical examples include:
+
+- workplace communication
+- relationship maintenance
+- important private chats
+- conversations where tone, framing, and strategy matter
+
+## Where It Is Not Ideal Yet
+
+Because the current system relies on visual-model-based chat extraction, it is not the best fit for extremely high-frequency reply scenarios.
+
+That includes:
+
+- rapid-fire back-and-forth chat
+- ultra-low-latency messaging situations
+- conversations where you must reply almost instantly every time
+
+In short, SocialClaw is better for conversations that deserve thought, not conversations that demand speed.
+
+## Start Here
+
+| Guide | Best for |
+| --- | --- |
+| [Model Configuration Guide](docs/model/model-configuration-guide.md) | Configure assistant, VLM, embedding, rerank, CLIProxyAPI, `.env`, and UI model settings |
+| [Memory Operations Guide](docs/memory/memory-operations-guide.md) | Import old chats, backfill memory, inspect profiles, regenerate memory, and edit profile data |
+| [EverMemOS Memory Build & Retrieval Guide](docs/memory/evermemos-memory-build-retrieval-guide.en.md) | Understand how memory is built, stored, retrieved, and fed into reply generation |
+| [Chat Record Acquisition Guide](docs/chat_record/old-chat-record-acquisition.md) | Export and ingest historical WeChat records |
+| [Visual Monitor Debugging Guide](docs/visual_monitor/visual-monitor-debugging-guide.md) | Tune ROI, screenshot behavior, and monitor-side debugging |
 
 ## Quick Start
 
-### 1. Clone & Configure
+### Recommended Setup Order
+
+Before using the startup scripts, prepare the environment first. The scripts are meant to launch services, not guess your local Python / Node setup.
+
+### 1. Prepare The Root Config
 
 ```bash
 git clone <your-repo-url> SocialClaw
 cd SocialClaw
-
-# Create environment config from template
 cp .env.example .env
-# Edit .env with your actual API keys and service URLs
 ```
 
-### 2. Start EverMemOS Data Stores
+Then edit `.env` and fill in at least:
+
+- assistant model endpoint and API key
+- vision model endpoint and API key
+- memory-side LLM settings
+- embedding and rerank settings, if needed
+
+### 2. Prepare The Visual Monitor Python Environment
+
+The repository expects a Conda environment for the Visual Monitor side. The recommended name is `social_copilot`.
+
+Example:
 
 ```bash
-cd memory/evermemos
-docker-compose up -d
-docker-compose ps   # Verify all services are healthy
-```
-
-This starts:
-- MongoDB (27017) — profiles, conversation metadata
-- Elasticsearch (19200) — full-text search
-- Milvus (19530) — vector similarity search
-- Redis (6379) — caching, pending boundaries
-
-### 3. Start EverMemOS API
-
-```bash
-cd memory/evermemos
-
-# Copy EverMemOS config if not already done
-cp env.template .env
-# Edit .env — at minimum set LLM_MODEL and any required API keys.
-# The template already matches the default SocialClaw startup mode:
-# - EverMemOS API runs on the host
-# - MongoDB / Redis / Elasticsearch / Milvus stay in Docker and are reached via localhost-mapped ports
-# If you run the EverMemOS API inside Docker instead, switch datastore hosts back to
-# docker-compose service names and local model endpoints to host.docker.internal.
-
-uv sync
-uv run python src/run.py --host 127.0.0.1 --port 1995
-```
-
-Verify:
-```bash
-curl http://127.0.0.1:1995/health
-```
-
-### 4. Start Visual Monitor API
-
-```bash
-cd SocialClaw
-
-# Create Visual Monitor config
-cp social_copilot/visual_monitor/config/visual_monitor.example.yaml \
-   social_copilot/visual_monitor/config/visual_monitor.yaml
-# Edit the yaml — set VLM model, assistant model, and API keys
-
-# Activate Python environment (conda or venv with requirements installed)
+conda create -n social_copilot python=3.12 -y
+conda activate social_copilot
 pip install -r social_copilot/visual_monitor/requirements.txt
-
-python -m uvicorn social_copilot.visual_monitor.app:app \
-  --host 127.0.0.1 --port 18777 --reload
 ```
 
-Verify:
+On macOS, the shell startup script defaults to:
+
 ```bash
-curl http://127.0.0.1:18777/health
-curl http://127.0.0.1:18777/monitor/status
+/Applications/miniconda3/envs/social_copilot/bin/python
 ```
 
-### 5. Start Electron Frontend
+If your Python path is different, set `VISUAL_MONITOR_PYTHON` before running the script.
+
+### 3. Prepare EverMemOS
+
+EverMemOS has its own environment template and Docker-backed data stores.
+
+```bash
+cd memory/evermemos
+cp env.template .env
+```
+
+Then edit `memory/evermemos/.env` and verify the model and datastore settings.
+
+Install the EverMemOS runtime with `uv`:
+
+```bash
+uv sync
+```
+
+### 4. Prepare The Frontend
 
 ```bash
 cd social_copilot/frontend
 npm install
+```
+
+## Recommended Startup Paths
+
+### Windows
+
+Recommended launcher:
+
+```powershell
+scripts\start_social_stack.cmd
+```
+
+Or directly:
+
+```powershell
+.\scripts\start_social_stack.ps1
+```
+
+Important note:
+
+- the Windows PowerShell script contains local executable path parameters for Python and Node
+- if your environment paths differ, edit the defaults at the top of the script or pass your own values explicitly
+
+Typical parameters you may need to adjust:
+
+- `VisualMonitorPython`
+- `EverMemOSPython`
+- `NodeExe`
+- `NpmCmd`
+
+This startup path is intended to launch:
+
+- EverMemOS Docker dependencies
+- EverMemOS API
+- Visual Monitor API
+- Electron frontend dev process
+
+To stop the stack:
+
+```powershell
+scripts\stop_social_stack.cmd
+```
+
+Or:
+
+```powershell
+.\scripts\stop_social_stack.ps1
+```
+
+### macOS / shell environments
+
+Recommended backend launcher:
+
+```bash
+./scripts/start_socialclaw.sh
+```
+
+This script starts the backend stack and waits for health checks to pass:
+
+- EverMemOS Docker dependencies
+- EverMemOS API
+- Visual Monitor API
+
+Then start the frontend separately:
+
+```bash
+cd social_copilot/frontend
 npm run dev
 ```
 
-### 6. Configure in UI
-
-On first launch, open the Settings panel and configure:
-- **Visual Monitor API**: `http://127.0.0.1:18777`
-- **EverMemOS API**: `http://127.0.0.1:1995`
-- **Owner User ID**: your test account identifier
-- **Assistant model**: your chat completion model endpoint
-- **Vision model**: your VLM endpoint
-
-### One-Script Startup (macOS)
+To stop the backend services:
 
 ```bash
-./scripts/start_socialclaw_macos.sh
+./scripts/stop_socialclaw.sh
 ```
 
-This starts Docker deps + EverMemOS API + Visual Monitor API.
-Start the frontend separately with `cd social_copilot/frontend && npm run dev`.
+## Manual Startup
 
-## Configuration Reference
+Use the manual path only if you want custom deployment control.
 
-All configuration is centralized in the root `.env` file. See `.env.example` for the full list with comments.
+1. Clone the repo and create `.env` from `.env.example`
+2. Prepare the Conda environment for Visual Monitor
+3. Prepare `memory/evermemos/.env` from `env.template`
+4. Start EverMemOS Docker dependencies in `memory/evermemos`
+5. Start EverMemOS API on `127.0.0.1:1995`
+6. Start Visual Monitor API on `127.0.0.1:18777`
+7. Start the Electron frontend in `social_copilot/frontend`
+8. Open Settings in the app and verify the assistant model, vision model, and API endpoints
 
-### Key Configuration Groups
+## Minimum Requirements
 
-| Group | Key Variables | Purpose |
-|-------|--------------|---------|
-| VLM | `SOCIAL_COPILOT_VISION_*` | Screenshot recognition model |
-| Assistant | `SOCIAL_COPILOT_ASSISTANT_*` | Reply suggestion model |
-| LLM | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | EverMemOS memory pipeline |
-| Embedding | `VECTORIZE_*` | Text embedding for vector search |
-| Rerank | `RERANK_*` | Search result reranking |
-| Data stores | `REDIS_*`, `MONGODB_*`, `ES_*`, `MILVUS_*` | Database connections |
+| Requirement | Notes |
+| --- | --- |
+| Python 3.12 | EverMemOS expects Python `>=3.12,<3.13` |
+| Conda | Recommended for the Visual Monitor environment |
+| Node.js 20+ | Needed for the Electron frontend |
+| Docker | Used for EverMemOS data stores |
+| OpenAI-compatible chat model | Used by assistant and memory-side LLM workflows |
+| VLM endpoint | Used for screenshot recognition |
+| Embedding + rerank services | Used by retrieval and memory search |
 
-### Fallback Chain
+## How SocialClaw Works
 
-Several variables support fallback to avoid duplication:
+1. Visual Monitor watches a live chat window and extracts structured messages from screenshots.
+2. The frontend coordinates event polling, memory synchronization, profile updates, and suggestion requests.
+3. EverMemOS updates long-term memory and contact profiles, then suggestion generation uses both the current message and stored context.
 
-```
-SOCIAL_COPILOT_ASSISTANT_BASE_URL → LLM_BASE_URL
-SOCIAL_COPILOT_ASSISTANT_API_KEY  → LLM_API_KEY
-SOCIAL_COPILOT_VISION_BASE_URL    → LLM_BASE_URL
-SOCIAL_COPILOT_VISION_API_KEY     → LLM_API_KEY
-```
+That creates a loop like this:
 
-If a dedicated service URL is empty, the system falls back to the generic LLM config.
+- a new message appears on screen
+- the screenshot is parsed into structured chat events
+- memory and profile state are updated
+- suggestion candidates are generated for the current conversation
 
-### Concurrency Control
+## Model Story
 
-```bash
-# Max concurrent LLM calls across the entire system (default: 5)
-LLM_MAX_CONCURRENT=5
-```
+SocialClaw separates three model roles:
 
-Reduce this if you see frequent `429 Too Many Requests` errors. Increase if your API provider supports higher throughput.
+- Assistant model: reply suggestion generation
+- Vision model: screenshot-to-message extraction
+- Memory-side LLM stack: memory extraction, profile generation, and retrieval orchestration
 
-## Tips & Debugging
+Because everything is OpenAI-compatible, you can mix providers or proxies. A common setup is:
 
-### Check Service Health
+- CLIProxyAPI or another OpenAI-compatible proxy for assistant / VLM
+- local or hosted embedding service
+- dedicated rerank service
 
-```bash
-# All services at a glance
-curl -s http://127.0.0.1:18777/health | python -m json.tool
-curl -s http://127.0.0.1:1995/health | python -m json.tool
+The app also exposes `stream` / `non_stream` strategy controls for assistant and VLM in the settings UI, which is useful when working with proxy-specific quirks.
 
-# Visual Monitor status (includes capture stats)
-curl -s http://127.0.0.1:18777/monitor/status | python -m json.tool
+## Configuration
 
-# Docker services
-cd memory/evermemos && docker-compose ps
-```
+The root `.env` is the main shared configuration entry point.
 
-### View Logs
+Important groups:
 
-```bash
-# If using the one-script startup
-tail -f .socialclaw-stack/evermemos.log
-tail -f .socialclaw-stack/visual-monitor.log
+| Group | Variables |
+| --- | --- |
+| Assistant | `SOCIAL_COPILOT_ASSISTANT_*` |
+| Vision / VLM | `SOCIAL_COPILOT_VISION_*` and `SOCIAL_COPILOT_VLM_*` |
+| EverMemOS / memory | `SOCIAL_COPILOT_EVERMEMOS_*` and `LLM_*` |
+| Embedding | `VECTORIZE_*` |
+| Rerank | `RERANK_*` |
+| Data stores | `REDIS_*`, `MONGODB_*`, `ES_*`, `MILVUS_*` |
 
-# EverMemOS logs (if running directly)
-# Logs go to stdout/stderr in the terminal
+For detailed provider setup, use the [Model Configuration Guide](docs/model/model-configuration-guide.md).
 
-# Visual Monitor (if running with --reload)
-# Logs go to stdout/stderr in the terminal
-```
+## Repository Layout
 
-### Test Individual Pipelines
-
-**Test VLM recognition** — trigger a manual capture:
-```bash
-curl -X POST http://127.0.0.1:18777/monitor/capture
-# Then check events
-curl http://127.0.0.1:18777/events/poll
-```
-
-**Test EverMemOS memory** — send a test chat:
-```bash
-curl -X POST http://127.0.0.1:1995/api/v1/copilot/process-chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "owner_user_id": "test_user",
-    "session_key": "WeChat::TestContact",
-    "display_name": "TestContact",
-    "messages": [
-      {"sender_id": "test_user", "sender_type": "user", "content": "hello", "content_type": "text"},
-      {"sender_id": "contact", "sender_type": "contact", "content": "hi there", "content_type": "text"}
-    ],
-    "incoming_message": {"sender_id": "contact", "sender_type": "contact", "content": "hi there", "content_type": "text"}
-  }'
-```
-
-**Test reply suggestions**:
-```bash
-curl -X POST http://127.0.0.1:18777/assistant/suggestions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [
-      {"sender": "contact", "text": "你好啊", "contact_name": "TestFriend"}
-    ],
-    "owner_user_id": "test_user",
-    "session_key": "WeChat::TestFriend"
-  }'
-```
-
-### Common Issues
-
-| Symptom | Check |
-|---------|-------|
-| No messages detected | VLM service reachable? `SOCIAL_COPILOT_VISION_*` configured? |
-| 429 rate limit errors | Reduce `LLM_MAX_CONCURRENT` (try 2-3) |
-| Memory not updating | MongoDB/Redis running? `docker-compose ps` |
-| Suggestions always fallback | `SOCIAL_COPILOT_EVERMEMOS_ENABLED=true`? EverMemOS API up? |
-| Empty suggestions | Check assistant model API key and base URL |
-| Profile not building | Need >=10 messages for threshold trigger, or set `force_profile_update: true` |
-
-### Verbose Logging
-
-```bash
-# In .env
-LOG_LEVEL=DEBUG
-```
-
-This enables detailed LLM call logging including token counts, durations, and finish reasons. Watch for warnings like `Duration too long` or `Finish reason: length` (truncated responses).
-
-## Documentation
-
-| Guide | Description |
-|-------|------------|
-| [Model Configuration](docs/model/model-configuration-guide.md) | How to configure LLM / VLM / Embedding models, use CLIProxyAPI to convert CLI subscriptions, .env vs UI settings |
-| [Memory Operations](docs/memory/memory-operations-guide.md) | Import old chats, backfill memory, view/edit friend profiles, profile regeneration |
-| [Chat Record Acquisition](docs/chat_record/old-chat-record-acquisition.md) | Validated pipeline for exporting WeChat old chat records via MemoTrace |
-| [Visual Monitor Debugging](docs/visual_monitor/visual-monitor-debugging-guide.md) | ROI tuning, screenshot frequency, debug mode, cached image inspection |
-
-## Project Structure
-
-```
+```text
 SocialClaw/
-├── .env.example              # Root environment config template
 ├── README.md
+├── README_ZN.md
+├── LICENSE
+├── .env.example
 ├── scripts/
-│   ├── start_socialclaw_macos.sh  # macOS one-script startup
-│   ├── stop_socialclaw_macos.sh   # macOS one-script shutdown
-│   ├── start_socialclaw_win.ps1   # Windows startup
-│   ├── stop_socialclaw_win.ps1    # Windows shutdown
-│   ├── start_socialclaw.sh        # Backward-compatible macOS wrapper
-│   ├── stop_socialclaw.sh         # Backward-compatible macOS wrapper
-│   ├── start_socialclaw.ps1       # Backward-compatible Windows wrapper
-│   └── stop_socialclaw.ps1        # Backward-compatible Windows wrapper
+│   ├── start_social_stack.cmd
+│   ├── start_social_stack.ps1
+│   ├── stop_social_stack.cmd
+│   ├── stop_social_stack.ps1
+│   ├── start_socialclaw.sh
+│   └── stop_socialclaw.sh
 ├── social_copilot/
-│   ├── agent/                # LLM clients, reply assistant
-│   ├── frontend/             # Electron + React frontend
-│   ├── visual_monitor/       # Screen capture, VLM, event bus
-│   │   ├── config/           # YAML config templates
-│   │   ├── api/              # FastAPI routes (monitor, assistant)
-│   │   └── core/             # Pipeline, scheduler, change detection
-│   └── requirements.txt
+│   ├── frontend/
+│   ├── visual_monitor/
+│   ├── agent/
+│   └── agent_runtime/
 ├── memory/
-│   └── evermemos/            # Memory & profile system
-│       ├── src/
-│       │   ├── copilot_orchestrator/  # Chat workflow, reply generator
-│       │   ├── memory_layer/          # LLM providers, memory manager
-│       │   ├── agentic_layer/         # Memory orchestration
-│       │   └── infra_layer/           # Persistence adapters
-│       ├── docker-compose.yaml
-│       ├── env.template
-│       └── pyproject.toml
+│   └── evermemos/
 └── docs/
 ```
 
-## Tech Stack
+## TODO / Roadmap
 
-- **Backend**: Python (FastAPI, asyncio, LangGraph, LangChain)
-- **Frontend**: Electron, React, TypeScript, Vite
-- **Data Stores**: MongoDB, Elasticsearch, Milvus, Redis
-- **AI**: OpenAI-compatible APIs (any provider), VLM for vision
+Areas we still want to improve:
+
+- strengthen the personalized memory system and let more long-term behavior be distilled into reusable skills
+- improve the UI and interaction design
+- let users inspect and adjust chat-record file contents directly from the UI
+- keep improving persona-skill import, management, and usage flow
+- improve stability and interpretability across the visual monitoring pipeline
+
+Feedback and co-creation are very welcome:
+
+- open issues
+- suggest improvements
+- contribute new persona skills
+- join the project and build with us
+
+## License
+
+This project is released under the [MIT License](./LICENSE).
+
+## Acknowledgements
+
+SocialClaw builds on ideas, inspiration, or upstream components from these projects:
+
+- [EverOS / EverMemOS](https://github.com/EverMind-AI/EverOS.git) for the memory-system foundation
+- [kkclaw](https://github.com/kk43994/kkclaw.git) for floating-orb UI inspiration
+- [awesome-persona-distill-skills](https://github.com/xixu-me/awesome-persona-distill-skills) for the persona-skill collection reference

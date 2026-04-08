@@ -4,6 +4,7 @@
 memory/cache/
 memory/chat_records/
 memory/memory_library/
+memory/evermemos/tmp_*
 social_copilot/log/
 
 # Python

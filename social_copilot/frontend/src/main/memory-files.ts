@@ -278,6 +278,9 @@ async function walkFiles(rootPath: string): Promise<string[]> {
   const entries = await readdir(rootPath, { withFileTypes: true })
   const files: string[] = []
   for (const entry of entries) {
+    if (isInternalMemoryArtifact(entry.name)) {
+      continue
+    }
     const entryPath = join(rootPath, entry.name)
     if (entry.isDirectory()) {
       files.push(...(await walkFiles(entryPath)))
@@ -307,6 +310,10 @@ function looksLikeTextFile(fileName: string): boolean {
   return ['.json', '.md', '.txt', '.log'].includes(extension)
 }
 
+function isInternalMemoryArtifact(entryName: string): boolean {
+  return entryName.startsWith('.')
+}
+
 async function safeReadText(targetPath: string): Promise<string> {
   try {
     return await readFile(targetPath, 'utf-8')
@@ -320,6 +327,16 @@ function summarizeFileContent(
   rawContent: string,
   ownerUserId?: string
 ): { title: string; summary: string; titleMeta?: string | null; tags: string[]; content: string; bubbles?: ChatBubble[]; skip: boolean } {
+  if (isInternalMemoryArtifact(basename(filePath))) {
+    return {
+      title: basename(filePath, extname(filePath)),
+      summary: '',
+      tags: [],
+      content: '',
+      skip: true
+    }
+  }
+
   const fileName = basename(filePath, extname(filePath))
   const trimmed = rawContent.trim()
   const tags = new Set<string>()

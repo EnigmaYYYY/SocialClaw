@@ -1284,6 +1284,9 @@ function computeSessionTitleSimilarity(left: string | null, right: string | null
   if (a === b) {
     return 1
   }
+  if (Math.min(a.length, b.length) <= 1) {
+    return 0
+  }
   if (a.includes(b) || b.includes(a)) {
     return Math.max(Math.min(a.length, b.length) / Math.max(a.length, b.length), 0.88)
   }
@@ -1968,6 +1971,7 @@ function normalizeConversationTitle(rawTitle: string | null): string | null {
   title = title
     .replace(/[（(]\d+[)）]\s*$/, '')
     .replace(/\s+-\s*(微信|wechat)\s*$/i, '')
+    .replace(/\s+ai\s*$/i, '')
     .trim()
   if (!title) {
     return null
@@ -3091,6 +3095,8 @@ export const __chatRecordsTestUtils = {
   normalizeAppName,
   normalizeSessionKey,
   buildPendingSessionId,
+  normalizeSessionTitleKey,
+  computeSessionTitleSimilarity,
   resolveMappedSessionName,
   learnSessionNameMappingsForAliases,
   loadSessionNameMappings,
