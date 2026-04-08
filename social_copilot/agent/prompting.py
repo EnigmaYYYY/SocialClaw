@@ -60,6 +60,22 @@ def build_social_reply_prompts(
     return system_prompt, user_prompt
 
 
+def format_chat_transcript(messages: list[ChatMessage]) -> str:
+    return _format_transcript(messages)
+
+
+def resolve_last_sender(messages: list[ChatMessage]) -> str:
+    return _resolve_last_sender(messages)
+
+
+def summarize_user_style(messages: list[ChatMessage]) -> str:
+    return _summarize_user_style(messages)
+
+
+def summarize_profile(profile: dict[str, Any] | None) -> str:
+    return _summarize_profile(profile)
+
+
 def _format_transcript(messages: list[ChatMessage]) -> str:
     if not messages:
         return "(no transcript)"

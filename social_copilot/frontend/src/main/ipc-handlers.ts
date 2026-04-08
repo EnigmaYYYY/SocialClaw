@@ -76,6 +76,7 @@ import {
 import { listProviderModels, probeProviderConnection } from './model-provider'
 import { buildVisualMonitorConfigPatchPayload } from './visual-monitor-config-patch'
 import { createDipToScreenPointMapper, dipRectToScreenRect } from './coordinate-utils'
+import { buildVisionFailureMessage, buildVisionSkipMessage, formatVisionStreamStrategy } from './vision-test-feedback'
 
 // ============================================================================
 // Service Instances
@@ -1635,9 +1636,10 @@ async function handleTestConnection(
   _event: Electron.IpcMainInvokeEvent,
   baseUrl: string,
   apiKey: string = '',
-  model: string = ''
+  model: string = '',
+  streamStrategy: 'stream' | 'non_stream' = 'non_stream'
 ): Promise<string> {
-  return probeProviderConnection(fetch as typeof globalThis.fetch, baseUrl, apiKey, model)
+  return probeProviderConnection(fetch as typeof globalThis.fetch, baseUrl, apiKey, model, streamStrategy)
 }
 
 async function handleTestVisionConnection(
@@ -1646,7 +1648,8 @@ async function handleTestVisionConnection(
   apiKey: string = '',
   model: string = '',
   maxTokens: number = 2000,
-  disableThinking: boolean = true
+  disableThinking: boolean = true,
+  streamStrategy: 'stream' | 'non_stream' = 'stream'
 ): Promise<string> {
   // Step 1: basic connectivity + text smoke test (original behavior)
   const basicResult = await probeProviderConnection(fetch as typeof globalThis.fetch, baseUrl, apiKey, model)
@@ -1657,7 +1660,15 @@ async function handleTestVisionConnection(
     (settings.visualMonitor as { apiBaseUrl?: string }).apiBaseUrl?.trim() ||
     DEFAULT_VISUAL_MONITOR_API_BASE_URL
 
-  let vlmResult: { ok: boolean; parse_ok: boolean; message_count: number; roundtrip_ms: number; error: string }
+  let vlmResult: {
+    ok: boolean
+    parse_ok: boolean
+    message_count: number
+    roundtrip_ms: number
+    error: string
+    raw_content_preview?: string
+    stream_strategy?: 'stream' | 'non_stream'
+  }
   try {
     const resp = await (fetch as typeof globalThis.fetch)(`${backendBaseUrl}/monitor/test-vlm`, {
       method: 'POST',
@@ -1668,27 +1679,29 @@ async function handleTestVisionConnection(
         model,
         max_tokens: maxTokens,
         disable_thinking: disableThinking,
+        stream_strategy: streamStrategy,
         timeout_ms: 60000
       })
     })
     if (!resp.ok) {
       const text = await resp.text()
-      return `${basicResult}（VLM图像测试跳过: 后端返回 ${resp.status}${text ? ': ' + text.slice(0, 100) : ''}）`
+      return buildVisionSkipMessage(
+        basicResult,
+        backendBaseUrl,
+        `后端返回 ${resp.status}${text ? ': ' + text.slice(0, 100) : ''}`
+      )
     }
     vlmResult = (await resp.json()) as typeof vlmResult
   } catch (exc) {
     const errMsg = exc instanceof Error ? exc.message : String(exc)
-    return `${basicResult}（VLM图像测试跳过: ${errMsg.slice(0, 100)}）`
+    return buildVisionSkipMessage(basicResult, backendBaseUrl, errMsg)
   }
 
   if (!vlmResult.ok) {
-    const detail = vlmResult.error
-      ? vlmResult.error.slice(0, 120)
-      : '模型未返回可解析的结构化结果'
-    throw new Error(`连接成功，但VLM图像解析失败: ${detail}`)
+    throw new Error(buildVisionFailureMessage(vlmResult))
   }
 
-  return `${basicResult}；图像解析通过（${vlmResult.message_count}条消息，${vlmResult.roundtrip_ms.toFixed(0)}ms）`
+  return `${basicResult}；图像解析通过（${formatVisionStreamStrategy(vlmResult.stream_strategy)}，${vlmResult.message_count}条消息，${vlmResult.roundtrip_ms.toFixed(0)}ms）`
 }
 
 /**

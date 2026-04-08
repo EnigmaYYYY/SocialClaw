@@ -188,7 +188,8 @@ export function buildVisualMonitorConfigPatchPayload(options: {
           model: visionProvider.modelName,
           api_key: visionProvider.apiKey,
           max_tokens: visionProvider.maxTokens,
-          disable_thinking: visionProvider.disableThinking
+          disable_thinking: visionProvider.disableThinking,
+          stream_strategy: visionProvider.streamStrategy ?? 'stream'
         }
       },
       frame_cache: {
@@ -206,7 +207,10 @@ export function buildVisualMonitorConfigPatchPayload(options: {
         base_url: assistantProvider.baseUrl,
         model: assistantProvider.modelName,
         api_key: assistantProvider.apiKey,
-        timeout_ms: assistantTimeoutMs
+        timeout_ms: assistantTimeoutMs,
+        stream_strategy: assistantProvider.streamStrategy ?? 'non_stream',
+        default_skill_id: assistantProvider.personaSkillId?.trim() || '',
+        skill_selection_enabled: false
       }
     }
   }

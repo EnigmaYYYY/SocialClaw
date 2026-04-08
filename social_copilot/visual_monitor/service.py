@@ -10,8 +10,6 @@ from typing import AsyncIterator, Callable
 
 from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
-
 from social_copilot.visual_monitor.adapters.capture_mss import MSSCaptureAdapter
 from social_copilot.visual_monitor.adapters.vision_litellm_structured import (
     LiteLLMStructuredVisionAdapter,
@@ -30,6 +28,8 @@ from social_copilot.visual_monitor.models.config import MonitorConfig
 from social_copilot.visual_monitor.models.events import MessageEvent
 from social_copilot.visual_monitor.observability.metrics import MonitorMetrics
 from social_copilot.visual_monitor.security.debug_storage import DebugFrameStorage
+
+logger = logging.getLogger(__name__)
 
 
 def _cleanup_old_cache_dirs(current_cache_dir: str) -> None:
@@ -300,6 +300,7 @@ class VisualMonitorService:
                 max_tokens=cfg.max_tokens,
                 temperature=cfg.temperature,
                 disable_thinking=cfg.disable_thinking,
+                stream_strategy=cfg.stream_strategy,
             )
         )
         if older_png is not None:
@@ -361,6 +362,7 @@ class VisualMonitorService:
                     max_tokens=vlm_cfg.max_tokens,
                     temperature=vlm_cfg.temperature,
                     disable_thinking=vlm_cfg.disable_thinking,
+                    stream_strategy=vlm_cfg.stream_strategy,
                 )
             )
         scheduler = CaptureScheduler(

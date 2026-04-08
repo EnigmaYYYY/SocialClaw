@@ -1,5 +1,9 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
+  fetchAssistantPersonaSkills,
+  type AssistantPersonaSkillOption
+} from '../../../services/assistant-persona-skills'
+import {
   RealtimeSuggestionAdapter,
   type AdapterStatus,
   type PendingSessionConfirmationUpdate
@@ -67,6 +71,16 @@ export function getSuggestionCardActionLabels(): typeof SUGGESTION_CARD_ACTION_L
 
 export function shouldAutoExpandForSuggestionUpdate(suggestionCount: number): boolean {
   return suggestionCount > 0
+}
+
+export function shouldShowFolioStage(
+  expanded: boolean,
+  surfacePreference: SurfacePreference,
+  hasPendingStage: boolean,
+  showWhisperStage: boolean,
+  showPromptStage: boolean
+): boolean {
+  return expanded && surfacePreference === 'folio' && !hasPendingStage && !showWhisperStage && !showPromptStage
 }
 
 export function shouldAutoOpenPromptForForegroundApp(
@@ -560,6 +574,9 @@ export function AssistantBubbleApp(): JSX.Element {
   const [frontmostAppName, setFrontmostAppName] = useState<string | null>(null)
   const [frontmostGatePassed, setFrontmostGatePassed] = useState<boolean | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [personaSkills, setPersonaSkills] = useState<AssistantPersonaSkillOption[]>([])
+  const [personaSkillsLoading, setPersonaSkillsLoading] = useState(false)
+  const [selectedPersonaSkillId, setSelectedPersonaSkillId] = useState('')
   const adapterRef = useRef<RealtimeSuggestionAdapter | null>(null)
   const windowBoundsRef = useRef<AssistantWindowBounds | null>(null)
   const orbWrapperRef = useRef<HTMLSpanElement | null>(null)
@@ -582,6 +599,7 @@ export function AssistantBubbleApp(): JSX.Element {
   const actionRunningRef = useRef(false)
   const baseExpressionRef = useRef<PetExpressionName>('normal')
   const lastInteractionRef = useRef<number>(Date.now())
+  const personaSelectionInitializedRef = useRef(false)
 
   const orderedSuggestions = useMemo(
     () => reorderSuggestions(suggestions, highlightedSuggestionIndex),
@@ -893,7 +911,41 @@ export function AssistantBubbleApp(): JSX.Element {
     }
     setSuggestions([])
     setErrorMessage(null)
-    await adapter.rerollCurrentRound()
+    await adapter.rerollCurrentRound(selectedPersonaSkillId)
+  }, [selectedPersonaSkillId])
+
+  const loadPersonaSkillOptions = useCallback(async (): Promise<void> => {
+    setPersonaSkillsLoading(true)
+    try {
+      const settings = await window.electronAPI.settings.load()
+      const skills = await fetchAssistantPersonaSkills(settings.visualMonitor.apiBaseUrl)
+      const defaultPersonaSkillId = settings.modelProviders.assistant.personaSkillId?.trim() || ''
+      setPersonaSkills(skills)
+      setSelectedPersonaSkillId((current) => {
+        if (personaSelectionInitializedRef.current) {
+          return current
+        }
+        personaSelectionInitializedRef.current = true
+        return defaultPersonaSkillId
+      })
+    } catch (error) {
+      console.error('Failed to load assistant persona skills:', error)
+      setPersonaSkills([])
+      setSelectedPersonaSkillId((current) => {
+        if (personaSelectionInitializedRef.current) {
+          return current
+        }
+        personaSelectionInitializedRef.current = true
+        return ''
+      })
+    } finally {
+      setPersonaSkillsLoading(false)
+    }
+  }, [])
+
+  const handlePersonaSkillChange = useCallback((nextSkillId: string): void => {
+    setSelectedPersonaSkillId(nextSkillId)
+    setErrorMessage(null)
   }, [])
 
   const postponePendingSessionConfirmation = useCallback(async (): Promise<void> => {
@@ -938,6 +990,10 @@ export function AssistantBubbleApp(): JSX.Element {
       setHighlightedSuggestionIndex(0)
     }
   }, [highlightedSuggestionIndex, suggestions.length])
+
+  useEffect(() => {
+    void loadPersonaSkillOptions()
+  }, [loadPersonaSkillOptions])
 
   useEffect(() => {
     let disposed = false
@@ -1095,7 +1151,7 @@ export function AssistantBubbleApp(): JSX.Element {
     setSuggestionEnabled(true)
     setPromptVisible(false)
     setSurfacePreference('auto')
-    await syncExpandedState(true)
+    await syncExpandedState(false, 'manual')
     try {
       await adapter.start()
     } catch (error) {
@@ -1148,8 +1204,10 @@ export function AssistantBubbleApp(): JSX.Element {
       return
     }
     setSuggestions([])
-    await adapter.rerollCurrentRound()
-  }, [])
+    setSurfacePreference('auto')
+    await syncExpandedState(false, 'manual')
+    await adapter.rerollCurrentRound(selectedPersonaSkillId)
+  }, [selectedPersonaSkillId, syncExpandedState])
 
   const copySuggestion = async (content: string): Promise<void> => {
     try {
@@ -1208,7 +1266,13 @@ export function AssistantBubbleApp(): JSX.Element {
   const showPendingStage = expanded && Boolean(pendingSessionConfirmation)
   const showWhisperStage = expanded && !showPendingStage && petView.surfaceMode === 'whispers' && Boolean(activeSuggestion)
   const showPromptStage = expanded && !showPendingStage && promptVisible && !activeSuggestion && surfacePreference === 'auto'
-  const showFolioStage = expanded && !showPendingStage && !showWhisperStage && !showPromptStage
+  const showFolioStage = shouldShowFolioStage(
+    expanded,
+    surfacePreference,
+    showPendingStage,
+    showWhisperStage,
+    showPromptStage
+  )
 
   return (
     <main className={`assistant-shell tone-${petView.accentTone} surface-${petView.surfaceMode}`}>
@@ -1293,6 +1357,26 @@ export function AssistantBubbleApp(): JSX.Element {
             </div>
 
             <footer className="assistant-whisper-footer">
+              <div className="assistant-persona-row">
+                <label htmlFor="assistant-card-persona-skill">回复人格</label>
+                <div className="assistant-persona-select-wrap">
+                  <select
+                    id="assistant-card-persona-skill"
+                    value={selectedPersonaSkillId}
+                    onChange={(event) => void handlePersonaSkillChange(event.target.value)}
+                  >
+                    <option value="">不启用</option>
+                    {personaSkills.map((skill) => (
+                      <option key={skill.skillId} value={skill.skillId}>
+                        {skill.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="assistant-whisper-time">
+                    {personaSkillsLoading ? '人格加载中' : '切换后点击重新生成生效'}
+                  </span>
+                </div>
+              </div>
               <div className="assistant-inline-actions">
                 <button type="button" onClick={() => void regenerateSuggestions()}>
                   {suggestionCardActionLabels.regenerate}

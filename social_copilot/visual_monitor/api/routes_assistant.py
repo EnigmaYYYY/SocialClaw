@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from social_copilot.agent.models import ChatMessage, ChatQuotedMessage
 from social_copilot.agent.openai_compatible import OpenAICompatibleClient, OpenAICompatibleConfig
 from social_copilot.agent.social_reply_assistant import SocialReplyAssistant
+from social_copilot.agent_runtime.skill_registry import SkillRegistry
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
@@ -37,6 +38,24 @@ class AssistantSuggestionRequest(BaseModel):
     contact_profile: dict[str, object] | None = None
     owner_user_id: str | None = None
     session_key: str | None = None
+    skill_id_override: str | None = None
+
+
+@router.get("/skills")
+async def assistant_skills() -> dict[str, object]:
+    registry = SkillRegistry()
+    skills = registry.list_skills()
+    return {
+        "count": len(skills),
+        "skills": [
+            {
+                "skill_id": item.skill_id,
+                "name": item.name,
+                "description": item.description,
+            }
+            for item in skills
+        ],
+    }
 
 
 def _to_evermemos_msg(msg: AssistantInputMessage) -> dict[str, object]:
@@ -164,16 +183,22 @@ async def assistant_suggestions(
             timeout_ms=assistant_cfg.timeout_ms,
             temperature=assistant_cfg.temperature,
             max_tokens=assistant_cfg.max_tokens,
+            stream_strategy=assistant_cfg.stream_strategy,
         )
     )
-    assistant = SocialReplyAssistant(client=client, suggestion_count=suggestion_count)
-
+    assistant = SocialReplyAssistant(
+        client=client,
+        suggestion_count=suggestion_count,
+        default_skill_id=assistant_cfg.default_skill_id,
+        skill_selection_enabled=assistant_cfg.skill_selection_enabled,
+    )
     try:
         result = assistant.generate(
             chat_messages=chat_messages,
             max_messages=max_messages,
             user_profile=payload.user_profile,
             contact_profile=payload.contact_profile,
+            skill_id_override=payload.skill_id_override,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"assistant_generation_failed:{exc}") from exc
@@ -194,5 +219,6 @@ async def assistant_suggestions(
             "messages_used": min(len(chat_messages), max_messages),
             "suggestion_count": suggestion_count,
             "model": assistant_cfg.model,
+            "selected_skill_ids": result.selected_skill_ids,
         },
     }

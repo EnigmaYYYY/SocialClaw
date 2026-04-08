@@ -1,4 +1,8 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  fetchAssistantPersonaSkills,
+  type AssistantPersonaSkillOption
+} from '../../services/assistant-persona-skills'
 import { getMemoryFolderItems } from './ui-layout-model'
 import { MemoryLibraryPanel } from './components/MemoryLibraryPanel'
 
@@ -96,6 +100,8 @@ export function MainConsoleApp(): JSX.Element {
   })
   const [providerConnectionTesting, setProviderConnectionTesting] = useState<Partial<Record<ProviderConnectionKey, boolean>>>({})
   const [providerFeedback, setProviderFeedback] = useState<Partial<Record<ProviderFeedbackKey, ProviderFeedbackState>>>({})
+  const [assistantPersonaSkills, setAssistantPersonaSkills] = useState<AssistantPersonaSkillOption[]>([])
+  const [assistantPersonaSkillsLoading, setAssistantPersonaSkillsLoading] = useState(false)
 
   // New account modal state
   const [showNewAccountModal, setShowNewAccountModal] = useState(false)
@@ -376,7 +382,8 @@ export function MainConsoleApp(): JSX.Element {
       label: string,
       baseUrl: string,
       apiKey: string = '',
-      selectedModel: string = ''
+      selectedModel: string = '',
+      streamStrategy: AppSettings['modelProviders']['assistant']['streamStrategy'] = 'non_stream'
     ): Promise<void> => {
       const trimmedBaseUrl = baseUrl.trim()
       if (!trimmedBaseUrl) {
@@ -385,7 +392,7 @@ export function MainConsoleApp(): JSX.Element {
       }
       setProviderConnectionTesting((previous) => ({ ...previous, [label]: true }))
       try {
-        const message = await window.electronAPI.settings.testConnection(trimmedBaseUrl, apiKey, selectedModel)
+        const message = await window.electronAPI.settings.testConnection(trimmedBaseUrl, apiKey, selectedModel, streamStrategy)
         updateProviderFeedback(key, `${label} ${message}`, 'success')
       } catch (error) {
         const message = error instanceof Error ? error.message : '连接测试失败'
@@ -397,6 +404,34 @@ export function MainConsoleApp(): JSX.Element {
     [updateProviderFeedback]
   )
 
+  const loadAssistantPersonaSkills = useCallback(
+    async (baseUrl?: string): Promise<void> => {
+      const trimmedBaseUrl = (baseUrl ?? settings?.visualMonitor.apiBaseUrl ?? '').trim()
+      if (!trimmedBaseUrl) {
+        setAssistantPersonaSkills([])
+        return
+      }
+      setAssistantPersonaSkillsLoading(true)
+      try {
+        const skills = await fetchAssistantPersonaSkills(trimmedBaseUrl)
+        setAssistantPersonaSkills(skills)
+      } catch (error) {
+        console.error('Failed to load assistant persona skills:', error)
+        setAssistantPersonaSkills([])
+      } finally {
+        setAssistantPersonaSkillsLoading(false)
+      }
+    },
+    [settings?.visualMonitor.apiBaseUrl]
+  )
+
+  useEffect(() => {
+    if (!settings) {
+      return
+    }
+    void loadAssistantPersonaSkills(settings.visualMonitor.apiBaseUrl)
+  }, [loadAssistantPersonaSkills, settings?.visualMonitor.apiBaseUrl])
+
   const testVisionProviderConnection = useCallback(
     async (
       key: ProviderFeedbackKey,
@@ -405,7 +440,8 @@ export function MainConsoleApp(): JSX.Element {
       apiKey: string = '',
       selectedModel: string = '',
       maxTokens: number = 2000,
-      disableThinking: boolean = true
+      disableThinking: boolean = true,
+      streamStrategy: AppSettings['modelProviders']['vision']['streamStrategy'] = 'stream'
     ): Promise<void> => {
       const trimmedBaseUrl = baseUrl.trim()
       if (!trimmedBaseUrl) {
@@ -419,7 +455,8 @@ export function MainConsoleApp(): JSX.Element {
           apiKey,
           selectedModel,
           maxTokens,
-          disableThinking
+          disableThinking,
+          streamStrategy
         )
         updateProviderFeedback(key, `${label} ${message}`, 'success')
       } catch (error) {
@@ -805,7 +842,7 @@ export function MainConsoleApp(): JSX.Element {
                   <button
                     type="button"
                     className="settings-inline-btn"
-                    onClick={() => void testProviderConnection('assistant', 'Assistant', settings.modelProviders.assistant.baseUrl, settings.modelProviders.assistant.apiKey, settings.modelProviders.assistant.modelName)}
+                    onClick={() => void testProviderConnection('assistant', 'Assistant', settings.modelProviders.assistant.baseUrl, settings.modelProviders.assistant.apiKey, settings.modelProviders.assistant.modelName, settings.modelProviders.assistant.streamStrategy)}
                     disabled={providerConnectionTesting.Assistant === true}
                   >
                     {providerConnectionTesting.Assistant ? '测试中...' : '测试连接'}
@@ -817,8 +854,57 @@ export function MainConsoleApp(): JSX.Element {
                   </div>
                 )}
               </div>
+              <div className="settings-row">
+                <label htmlFor="assistant-stream-strategy">输出策略</label>
+                <select
+                  id="assistant-stream-strategy"
+                  value={settings.modelProviders.assistant.streamStrategy}
+                  onChange={(event) =>
+                    updateModelProvider('assistant', (previous) => ({
+                      ...previous,
+                      streamStrategy: event.target.value as AppSettings['modelProviders']['assistant']['streamStrategy']
+                    }))
+                  }
+                >
+                  <option value="non_stream">非流式输出（推荐）</option>
+                  <option value="stream">流式输出</option>
+                </select>
+              </div>
+              <div className="settings-row settings-row-model-select">
+                <label htmlFor="assistant-persona-skill">外置人格</label>
+                <div className="settings-model-select-group">
+                  <select
+                    id="assistant-persona-skill"
+                    value={settings.modelProviders.assistant.personaSkillId}
+                    onChange={(event) =>
+                      updateModelProvider('assistant', (previous) => ({
+                        ...previous,
+                        personaSkillId: event.target.value
+                      }))
+                    }
+                  >
+                    <option value="">不启用</option>
+                    {assistantPersonaSkills.map((skill) => (
+                      <option key={skill.skillId} value={skill.skillId}>
+                        {skill.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="settings-inline-btn"
+                    onClick={() => void loadAssistantPersonaSkills()}
+                    disabled={assistantPersonaSkillsLoading}
+                  >
+                    {assistantPersonaSkillsLoading ? '刷新中...' : '刷新人格'}
+                  </button>
+                </div>
+              </div>
               <p className="settings-tip">
                 支持 OpenAI-compatible `/models` 或 `/v1/models`。模型名既可拉取后选择，也可直接手动输入。例如 cliproxy 请填写 `http://localhost:8317/v1`。
+              </p>
+              <p className="settings-tip">
+                这里设置默认人格风格。建议卡片里可以临时切换不同人格做对比，不会改动这里的默认值。
               </p>
             </section>
 
@@ -886,7 +972,7 @@ export function MainConsoleApp(): JSX.Element {
                   <button
                     type="button"
                     className="settings-inline-btn"
-                    onClick={() => void testVisionProviderConnection('vision', '视觉模型', settings.modelProviders.vision.baseUrl, settings.modelProviders.vision.apiKey, settings.modelProviders.vision.modelName, settings.modelProviders.vision.maxTokens, settings.modelProviders.vision.disableThinking)}
+                    onClick={() => void testVisionProviderConnection('vision', '视觉模型', settings.modelProviders.vision.baseUrl, settings.modelProviders.vision.apiKey, settings.modelProviders.vision.modelName, settings.modelProviders.vision.maxTokens, settings.modelProviders.vision.disableThinking, settings.modelProviders.vision.streamStrategy)}
                     disabled={providerConnectionTesting['视觉模型'] === true}
                   >
                     {providerConnectionTesting['视觉模型'] ? '测试中...' : '测试连接'}
@@ -897,6 +983,22 @@ export function MainConsoleApp(): JSX.Element {
                     {providerFeedback.vision.message}
                   </div>
                 )}
+              </div>
+              <div className="settings-row">
+                <label htmlFor="vision-stream-strategy">输出策略</label>
+                <select
+                  id="vision-stream-strategy"
+                  value={settings.modelProviders.vision.streamStrategy}
+                  onChange={(event) =>
+                    updateModelProvider('vision', (previous) => ({
+                      ...previous,
+                      streamStrategy: event.target.value as AppSettings['modelProviders']['vision']['streamStrategy']
+                    }))
+                  }
+                >
+                  <option value="stream">流式输出（推荐）</option>
+                  <option value="non_stream">非流式输出</option>
+                </select>
               </div>
               <div className="settings-row">
                 <label htmlFor="vision-max-tokens">Max Tokens</label>

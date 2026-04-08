@@ -742,6 +742,8 @@ export const VisualMonitorStrategySchema = z.enum(['manual', 'auto', 'hybrid'])
 export type VisualMonitorStrategy = z.infer<typeof VisualMonitorStrategySchema>
 export const OcrModelStrategySchema = z.enum(['ocr', 'vlm_structured', 'hybrid'])
 export type OcrModelStrategy = z.infer<typeof OcrModelStrategySchema>
+export const VisionStreamStrategySchema = z.enum(['stream', 'non_stream'])
+export type VisionStreamStrategy = z.infer<typeof VisionStreamStrategySchema>
 
 export const WindowPositionSchema = z.object({
   x: z.number(),
@@ -764,7 +766,9 @@ export const ModelProviderSettingsSchema = z.object({
   modelName: z.string().min(1),
   requestTimeoutMs: z.number().int().min(1000).max(120000).default(30000),
   maxTokens: z.number().int().min(64).max(32768).default(2000),
-  disableThinking: z.boolean().default(true)
+  disableThinking: z.boolean().default(true),
+  streamStrategy: VisionStreamStrategySchema.default('stream'),
+  personaSkillId: z.string().default('')
 })
 export type ModelProviderSettings = z.infer<typeof ModelProviderSettingsSchema>
 
@@ -958,7 +962,9 @@ export const AppSettingsSchema = z.object({
       modelName: 'sii-dsv3.1',
       requestTimeoutMs: 30000,
       maxTokens: 2000,
-      disableThinking: true
+      disableThinking: true,
+      streamStrategy: 'non_stream',
+      personaSkillId: ''
     },
     vision: {
       baseUrl: 'https://litellm.sii.sh.cn/v1',
@@ -966,7 +972,9 @@ export const AppSettingsSchema = z.object({
       modelName: 'sii-Qwen3-VL-235B-A22B-Instruct',
       requestTimeoutMs: 30000,
       maxTokens: 2000,
-      disableThinking: true
+      disableThinking: true,
+      streamStrategy: 'stream',
+      personaSkillId: ''
     }
   }),
   visualMonitor: VisualMonitorSettingsSchema.default({
@@ -1054,7 +1062,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       modelName: 'sii-dsv3.1',
       requestTimeoutMs: 30000,
       maxTokens: 2000,
-      disableThinking: true
+      disableThinking: true,
+      streamStrategy: 'non_stream',
+      personaSkillId: ''
     },
     vision: {
       baseUrl: 'https://litellm.sii.sh.cn/v1',
@@ -1062,7 +1072,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       modelName: 'sii-Qwen3-VL-235B-A22B-Instruct',
       requestTimeoutMs: 30000,
       maxTokens: 2000,
-      disableThinking: true
+      disableThinking: true,
+      streamStrategy: 'stream',
+      personaSkillId: ''
     }
   },
   visualMonitor: {

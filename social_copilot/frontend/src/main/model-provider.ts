@@ -70,7 +70,8 @@ export async function probeProviderConnection(
   fetchImpl: ModelProviderFetch,
   baseUrl: string,
   apiKey: string = '',
-  model: string = ''
+  model: string = '',
+  streamStrategy: 'stream' | 'non_stream' = 'non_stream'
 ): Promise<string> {
   const trimmedModel = model.trim()
   let models: string[] | null = null
@@ -100,7 +101,7 @@ export async function probeProviderConnection(
       ],
       temperature: 0,
       max_tokens: 8,
-      stream: false
+      stream: streamStrategy === 'stream'
     })
   })
   if (!response.ok) {
@@ -108,10 +109,10 @@ export async function probeProviderConnection(
   }
 
   if (models === null) {
-    return `连接成功；服务不支持列模型，手动模型 ${trimmedModel} smoke test 通过`
+    return `连接成功；服务不支持列模型，手动模型 ${trimmedModel} smoke test 通过（${streamStrategy === 'stream' ? '流式输出' : '非流式输出'}）`
   }
   if (!models.includes(trimmedModel)) {
-    return `连接成功，可用模型 ${models.length} 个；手动模型 ${trimmedModel} smoke test 通过，但未出现在列表中`
+    return `连接成功，可用模型 ${models.length} 个；手动模型 ${trimmedModel} smoke test 通过（${streamStrategy === 'stream' ? '流式输出' : '非流式输出'}），但未出现在列表中`
   }
-  return `连接成功，可用模型 ${models.length} 个；当前模型 ${trimmedModel} smoke test 通过`
+  return `连接成功，可用模型 ${models.length} 个；当前模型 ${trimmedModel} smoke test 通过（${streamStrategy === 'stream' ? '流式输出' : '非流式输出'}）`
 }

@@ -1031,7 +1031,8 @@ function buildPendingSessionId(target: {
     normalizeSessionTitleKey(target.suggestedSessionKey ? splitSessionKey(target.suggestedSessionKey).sessionName : null)
     || normalizeSessionTitleKey(target.sessionName)
     || sanitizeSessionName(target.sessionName)
-  return sanitizeSessionName(`${sanitizeSessionName(target.appName)}_${candidateKey}`)
+  const normalizedAppName = sanitizeSessionName(normalizeAppName(target.appName))
+  return sanitizeSessionName(`${normalizedAppName}_${candidateKey}`)
 }
 
 function retargetChatRecordEntriesToSession(
@@ -1150,7 +1151,7 @@ function getPendingSessionsRoot(recordsDir: string): string {
 }
 
 function getNameMappingsFilePath(recordsDir: string): string {
-  return join(dirname(recordsDir), NAME_MAPPINGS_FILE_NAME)
+  return join(recordsDir, NAME_MAPPINGS_FILE_NAME)
 }
 
 function getLegacyNameMappingsFilePath(recordsDir: string): string {

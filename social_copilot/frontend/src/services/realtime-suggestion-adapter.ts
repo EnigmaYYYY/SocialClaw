@@ -152,6 +152,7 @@ export class RealtimeSuggestionAdapter {
   private currentContactName: string | null = null
   private currentSessionKey: string | null = null
   private currentContactCacheKey: string | null = null
+  private currentSkillIdOverride: string | null = null
   private sessionRounds = new Map<string, SessionRoundState>()
   private onSuggestionsCallback: ((update: RealtimeSuggestionUpdate) => void) | null = null
   private onPendingSessionConfirmationCallback: ((update: PendingSessionConfirmationUpdate) => void) | null = null
@@ -263,6 +264,7 @@ export class RealtimeSuggestionAdapter {
     this.currentSessionKey = null
     this.currentContactName = null
     this.currentContactCacheKey = null
+    this.currentSkillIdOverride = null
     if (this.timerId !== null) {
       window.clearInterval(this.timerId)
       this.timerId = null
@@ -348,11 +350,12 @@ export class RealtimeSuggestionAdapter {
     await this.maybeRequestSuggestions(baseUrl, sessionKey)
   }
 
-  async rerollCurrentRound(): Promise<void> {
+  async rerollCurrentRound(skillIdOverride: string | null = this.currentSkillIdOverride): Promise<void> {
     const sessionKey = this.currentSessionKey
     if (!this.running || !this.suggestionsEnabled || !this.settings || !sessionKey) {
       return
     }
+    this.currentSkillIdOverride = skillIdOverride
 
     const baseUrl = this.settings.visualMonitor.apiBaseUrl?.trim() || 'http://127.0.0.1:18777'
     const gate = this.ensureSessionRound(sessionKey)
@@ -655,7 +658,8 @@ export class RealtimeSuggestionAdapter {
       })),
       suggestion_count: this.suggestionCount,
       user_profile: userProfile,
-      contact_profile: contactProfile
+      contact_profile: contactProfile,
+      skill_id_override: this.currentSkillIdOverride
     }
 
     const response = await fetch(`${baseUrl}/assistant/suggestions`, {

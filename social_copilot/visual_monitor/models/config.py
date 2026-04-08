@@ -48,6 +48,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_choice(name: str, default: str, allowed: set[str]) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    return value if value in allowed else default
+
+
 class FpsConfig(BaseModel):
     idle: int = 1
     active_min: int = 2
@@ -90,6 +97,13 @@ class VisionLiteLLMConfig(BaseModel):
         le=2.0,
     )
     disable_thinking: bool = Field(default_factory=lambda: _env_bool("SOCIAL_COPILOT_VLM_DISABLE_THINKING", True))
+    stream_strategy: Literal["stream", "non_stream"] = Field(
+        default_factory=lambda: _env_choice(
+            "SOCIAL_COPILOT_VLM_STREAM_STRATEGY",
+            "stream",
+            {"stream", "non_stream"},
+        )
+    )
 
 
 class VisionIncrementalConfig(BaseModel):
@@ -212,6 +226,13 @@ class AssistantModelConfig(BaseModel):
         default_factory=lambda: _env_int("SOCIAL_COPILOT_ASSISTANT_MAX_TOKENS", 800),
         ge=32,
     )
+    stream_strategy: Literal["stream", "non_stream"] = Field(
+        default_factory=lambda: _env_choice(
+            "SOCIAL_COPILOT_ASSISTANT_STREAM_STRATEGY",
+            "non_stream",
+            {"stream", "non_stream"},
+        )
+    )
     suggestion_count: int = Field(
         default_factory=lambda: _env_int("SOCIAL_COPILOT_ASSISTANT_SUGGESTION_COUNT", 3),
         ge=1,
@@ -221,6 +242,15 @@ class AssistantModelConfig(BaseModel):
         default_factory=lambda: _env_int("SOCIAL_COPILOT_ASSISTANT_MAX_MESSAGES", 24),
         ge=4,
         le=120,
+    )
+    default_skill_id: str = Field(
+        default_factory=lambda: _env_str(
+            "SOCIAL_COPILOT_ASSISTANT_SKILL_ID",
+            "",
+        )
+    )
+    skill_selection_enabled: bool = Field(
+        default_factory=lambda: _env_bool("SOCIAL_COPILOT_ASSISTANT_SKILL_SELECTION_ENABLED", False)
     )
 
 

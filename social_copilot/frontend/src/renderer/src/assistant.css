@@ -553,9 +553,45 @@ body {
 }
 
 .assistant-whisper-footer {
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
   margin-top: 10px;
+}
+
+.assistant-persona-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.assistant-persona-row label {
+  font-size: 10px;
+  color: rgba(16, 52, 91, 0.7);
+  white-space: nowrap;
+}
+
+.assistant-persona-select-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assistant-persona-select-wrap select {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid rgba(54, 118, 182, 0.14);
+  background: rgba(249, 252, 255, 0.94);
+  color: var(--pet-ink);
+  padding: 6px 10px;
+  font-size: 10px;
+}
+
+.assistant-persona-select-wrap .assistant-whisper-time {
+  text-align: right;
 }
 
 .assistant-whisper-suggestion-list {

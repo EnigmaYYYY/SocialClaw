@@ -531,9 +531,15 @@ export interface SettingsAPI {
    * @param baseUrl - Provider base URL
    * @param apiKey - Provider API key
    * @param model - Optional selected model ID for smoke test
+   * @param streamStrategy - Whether smoke test should use stream or non-stream mode
    * @returns Connectivity result message
    */
-  testConnection: (baseUrl: string, apiKey?: string, model?: string) => Promise<string>
+  testConnection: (
+    baseUrl: string,
+    apiKey?: string,
+    model?: string,
+    streamStrategy?: 'stream' | 'non_stream'
+  ) => Promise<string>
 
   /**
    * Tests vision model connectivity AND sends a fixed test image to verify VLM image parsing
@@ -549,7 +555,8 @@ export interface SettingsAPI {
     apiKey?: string,
     model?: string,
     maxTokens?: number,
-    disableThinking?: boolean
+    disableThinking?: boolean,
+    streamStrategy?: 'stream' | 'non_stream'
   ) => Promise<string>
 
   /**
@@ -1111,17 +1118,23 @@ const settingsAPI: SettingsAPI = {
   listModels: (baseUrl: string, apiKey: string = ''): Promise<string[]> =>
     ipcRenderer.invoke('settings:listModels', baseUrl, apiKey),
 
-  testConnection: (baseUrl: string, apiKey: string = '', model: string = ''): Promise<string> =>
-    ipcRenderer.invoke('settings:testConnection', baseUrl, apiKey, model),
+  testConnection: (
+    baseUrl: string,
+    apiKey: string = '',
+    model: string = '',
+    streamStrategy: 'stream' | 'non_stream' = 'non_stream'
+  ): Promise<string> =>
+    ipcRenderer.invoke('settings:testConnection', baseUrl, apiKey, model, streamStrategy),
 
   testVisionConnection: (
     baseUrl: string,
     apiKey: string = '',
     model: string = '',
     maxTokens: number = 2000,
-    disableThinking: boolean = true
+    disableThinking: boolean = true,
+    streamStrategy: 'stream' | 'non_stream' = 'stream'
   ): Promise<string> =>
-    ipcRenderer.invoke('settings:testVisionConnection', baseUrl, apiKey, model, maxTokens, disableThinking),
+    ipcRenderer.invoke('settings:testVisionConnection', baseUrl, apiKey, model, maxTokens, disableThinking, streamStrategy),
 
   completeOnboarding: (): Promise<void> =>
     ipcRenderer.invoke('settings:completeOnboarding')
@@ -1406,4 +1419,3 @@ declare global {
     electronAPI: ElectronAPI
   }
 }
-

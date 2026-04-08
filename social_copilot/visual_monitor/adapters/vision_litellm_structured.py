@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from socket import timeout as SocketTimeout
 from time import sleep
-from time import perf_counter
 
 import httpx
 
+from social_copilot.agent.openai_compatible import OpenAICompatibleClient, OpenAICompatibleConfig
 from social_copilot.visual_monitor.core.vlm_structured_parser import (
     parse_vlm_structured_content,
     parse_vlm_structured_payload,
@@ -20,7 +20,6 @@ from social_copilot.visual_monitor.models.vlm_structured import VLMStructuredMes
 
 DEFAULT_TIMEOUT_RETRY_ATTEMPTS = 2
 DEFAULT_TIMEOUT_RETRY_DELAY_MS = 250
-
 
 DEFAULT_WECHAT_STRUCTURED_PROMPT = """任务：你会收到一张完整的微信窗口截图。请只提取当前主会话的结构化聊天消息。
 第一步必须先做：读取右侧主聊天面板顶部的会话标题（群名或联系人名）作为 conversation_title。
@@ -50,6 +49,10 @@ DEFAULT_WECHAT_STRUCTURED_PROMPT = """任务：你会收到一张完整的微信
 9) 对消息时间，优先输出 time_anchor；只有在截图里真的看到了时间文本时，time_anchor.value 才能填写具体值。
 10) 如果看不到明确时间，不要编造时间；保留合适的 source，并让 value 为 null。
 11) 不要把左侧会话列表中当前选中项的最后一条预览，当成右侧主会话里的真实消息。
+12) 如果你无法确定任何消息，也必须返回合法 JSON，并让 messages 为 []；不要输出解释、道歉、注释或 Markdown。
+13) 所有枚举值必须严格从示例中选择；未知时使用 unknown。
+14) quoted_message、time_anchor、selected_session_time_hint 在缺失时可以直接填 null；不要为了凑结构而编造字段值。
+15) non_text_signature_parts 缺失时返回 []；不要输出完整句子。
 
 只输出严格 JSON（不要 Markdown/解释）：
 {"schema_version":"draft-1","app_name":"WeChat","capture_time":"ISO-8601 string|null","conversation":{"display_title":"string|null","title_confidence":0.0,"title_source":"main_header|window_context|inferred|unknown"},"window_time_context":{"visible_time_markers":[{"value":"string","source":"chat_separator|sidebar_selected_session|other","position_hint":"string|null"}],"selected_session_time_hint":{"value":"string|null","source":"sidebar_selected_session|other"}},"messages":[{"sender":"user|contact|unknown","contact_name":"string|null","text":"string","content_type":"text|emoji|sticker|image|mixed|unknown","non_text_description":"string|null","non_text_signature_parts":["string"],"quoted_message":{"text":"string","sender_name":"string|null"},"time_anchor":{"value":"string|null","source":"exact_separator|sidebar_selected_session|segment_inferred|capture_fallback|unknown","confidence":0.0},"confidence":0.0}],"extraction_meta":{"mode":"snapshot"}}"""
@@ -76,10 +79,13 @@ DEFAULT_WECHAT_INCREMENTAL_PROMPT = """你会收到两张完整的微信窗口�
 9) 尽量输出 window_time_context 与每条消息的 time_anchor。
 10) 只有在截图里真的看到了时间文本时，time_anchor.value 才能填写具体值；不要编造时间。
 11) 如果无法确定某条内容是不是 older 已存在，宁可不输出，也不要把旧消息重复当作新增。
+12) 如果没有新增，也必须返回合法 JSON，并让 messages 为 []；不要输出解释、道歉、注释或 Markdown。
+13) 所有枚举值必须严格从示例中选择；未知时使用 unknown。
+14) quoted_message、time_anchor、selected_session_time_hint 在缺失时可以直接填 null；不要为了凑结构而编造字段值。
+15) non_text_signature_parts 缺失时返回 []；不要输出完整句子。
 
 只输出严格 JSON（不要 Markdown/解释）：
 {"schema_version":"draft-1","app_name":"WeChat","capture_time":"ISO-8601 string|null","conversation":{"display_title":"string|null","title_confidence":0.0,"title_source":"main_header|window_context|inferred|unknown"},"window_time_context":{"visible_time_markers":[{"value":"string","source":"chat_separator|sidebar_selected_session|other","position_hint":"string|null"}],"selected_session_time_hint":{"value":"string|null","source":"sidebar_selected_session|other"}},"messages":[{"sender":"user|contact|unknown","contact_name":"string|null","text":"string","content_type":"text|emoji|sticker|image|mixed|unknown","non_text_description":"string|null","non_text_signature_parts":["string"],"quoted_message":{"text":"string","sender_name":"string|null"},"time_anchor":{"value":"string|null","source":"exact_separator|sidebar_selected_session|segment_inferred|capture_fallback|unknown","confidence":0.0},"confidence":0.0}],"extraction_meta":{"mode":"incremental"}}"""
-
 
 @dataclass(slots=True)
 class LiteLLMStructuredVisionConfig:
@@ -91,6 +97,7 @@ class LiteLLMStructuredVisionConfig:
     max_tokens: int = 800
     temperature: float = 0.0
     disable_thinking: bool = True
+    stream_strategy: str = "stream"
 
 
 @dataclass(slots=True)
@@ -113,8 +120,23 @@ class LiteLLMStructuredVisionResult:
 
 
 class LiteLLMStructuredVisionAdapter:
-    def __init__(self, config: LiteLLMStructuredVisionConfig) -> None:
+    def __init__(
+        self,
+        config: LiteLLMStructuredVisionConfig,
+        client: OpenAICompatibleClient | None = None,
+    ) -> None:
         self._config = config
+        self._client = client or OpenAICompatibleClient(
+            OpenAICompatibleConfig(
+                base_url=config.base_url,
+                model=config.model,
+                api_key=config.api_key,
+                api_key_env=config.api_key_env,
+                timeout_ms=config.timeout_ms,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+        )
 
     @staticmethod
     def _rabbit_log(message: str) -> None:
@@ -206,34 +228,18 @@ class LiteLLMStructuredVisionAdapter:
             image_base64 = base64.b64encode(image_png).decode("ascii")
             content_blocks.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}})
 
-        # When disable_thinking is True, inject the thinking=disabled budget token
-        # and force temperature=1 as required by reasoning models in non-thinking mode.
         if self._config.disable_thinking:
-            effective_temperature = 1.0
-            thinking_extra: dict[str, object] = {"thinking": {"type": "disabled"}}
+            effective_temperature = 0.0
+            extra_body: dict[str, object] = {"thinking": {"type": "disabled"}}
         else:
             effective_temperature = self._config.temperature
-            thinking_extra = {}
-
-        payload: dict[str, object] = {
-            "model": self._config.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content_blocks,
-                }
-            ],
-            "temperature": effective_temperature,
-            "max_tokens": self._config.max_tokens,
-            "stream": False,
-            **thinking_extra,
-        }
-        url = f"{self._config.base_url.rstrip('/')}/chat/completions"
-        started = perf_counter()
-        raw = ""
-        headers: dict[str, str] = {}
+            extra_body = {}
         attempt_errors: list[str] = []
         attempt_count = 0
+        raw = ""
+        headers: dict[str, str] = {}
+        raw_content = ""
+        roundtrip_ms = 0.0
         for attempt in range(1, DEFAULT_TIMEOUT_RETRY_ATTEMPTS + 1):
             attempt_count = attempt
             self._rabbit_log(
@@ -242,79 +248,24 @@ class LiteLLMStructuredVisionAdapter:
                 f"model={self._config.model}, image_count={len(images_png)})"
             )
             try:
-                with httpx.Client(timeout=self._config.timeout_ms / 1000.0, trust_env=False) as client:
-                    response = client.post(
-                        url,
-                        json=payload,
-                        headers={
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                            "Authorization": f"Bearer {api_key}",
-                            "User-Agent": "social-copilot-vlm/1.0",
-                        },
-                    )
-                    raw = response.text
-                    response.raise_for_status()
-                    headers = {key.lower(): value for key, value in response.headers.items()}
+                response = self._client.chat(
+                    messages=[{"role": "user", "content": content_blocks}],
+                    temperature=effective_temperature,
+                    max_tokens=self._config.max_tokens,
+                    extra_body=extra_body,
+                    prefer_stream=self._config.stream_strategy == "stream",
+                    allow_stream_fallback=self._config.stream_strategy == "stream",
+                )
+                raw = response.raw_response
+                raw_content = response.content
+                headers = response.headers
+                roundtrip_ms = response.roundtrip_ms
                 self._rabbit_log(
                     "VLM response received "
-                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, status={response.status_code})"
+                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, parse_stage=model_done)"
                 )
                 break
-            except httpx.HTTPStatusError as exc:
-                error_text = f"HTTPStatusError:{exc.response.status_code}:{_compact_error_body(exc.response.text)}"
-                attempt_errors.append(error_text)
-                self._rabbit_log(
-                    "VLM response received with HTTPStatusError "
-                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, error={error_text})"
-                )
-                result = LiteLLMStructuredVisionResult(
-                    messages=[],
-                    conversation_title=None,
-                    schema_version=None,
-                    conversation=None,
-                    window_time_context=None,
-                    extraction_meta=None,
-                    raw_response="",
-                    raw_content="",
-                    attempt_count=attempt_count,
-                    attempt_errors=attempt_errors,
-                    parse_ok=False,
-                    roundtrip_ms=(perf_counter() - started) * 1000.0,
-                    litellm_duration_ms=None,
-                    provider_duration_ms=None,
-                    error=error_text,
-                )
-                self._persist_debug_log(prompt=prompt, images_png=images_png, result=result)
-                return result
-            except httpx.HTTPError as exc:
-                error_text = f"HTTPError:{exc}"
-                attempt_errors.append(error_text)
-                self._rabbit_log(
-                    "VLM response received with HTTPError "
-                    f"(attempt={attempt}/{DEFAULT_TIMEOUT_RETRY_ATTEMPTS}, error={error_text})"
-                )
-                if attempt >= DEFAULT_TIMEOUT_RETRY_ATTEMPTS or not _is_timeout_error(exc):
-                    result = LiteLLMStructuredVisionResult(
-                        messages=[],
-                        conversation_title=None,
-                        schema_version=None,
-                        conversation=None,
-                        window_time_context=None,
-                        extraction_meta=None,
-                        raw_response="",
-                        raw_content="",
-                        attempt_count=attempt_count,
-                        attempt_errors=attempt_errors,
-                        parse_ok=False,
-                        roundtrip_ms=(perf_counter() - started) * 1000.0,
-                        litellm_duration_ms=None,
-                        provider_duration_ms=None,
-                        error=error_text,
-                    )
-                    self._persist_debug_log(prompt=prompt, images_png=images_png, result=result)
-                    return result
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 error_text = str(exc)
                 attempt_errors.append(error_text)
                 self._rabbit_log(
@@ -334,7 +285,7 @@ class LiteLLMStructuredVisionAdapter:
                         attempt_count=attempt_count,
                         attempt_errors=attempt_errors,
                         parse_ok=False,
-                        roundtrip_ms=(perf_counter() - started) * 1000.0,
+                        roundtrip_ms=roundtrip_ms,
                         litellm_duration_ms=None,
                         provider_duration_ms=None,
                         error=error_text,
@@ -344,8 +295,6 @@ class LiteLLMStructuredVisionAdapter:
             if attempt < DEFAULT_TIMEOUT_RETRY_ATTEMPTS:
                 sleep(DEFAULT_TIMEOUT_RETRY_DELAY_MS / 1000.0)
 
-        roundtrip_ms = (perf_counter() - started) * 1000.0
-        raw_content = _extract_content_from_chat_completion(raw)
         payload = parse_vlm_structured_payload(raw_content)
         messages, parse_ok, conversation_title = parse_vlm_structured_content(raw_content)
         self._rabbit_log(
@@ -388,6 +337,7 @@ class LiteLLMStructuredVisionAdapter:
                 "model": self._config.model,
                 "base_url": self._config.base_url,
                 "disable_thinking": self._config.disable_thinking,
+                "stream_strategy": self._config.stream_strategy,
                 "prompt": prompt,
                 "image_count": len(images_png),
                 "image_sizes": [len(item) for item in images_png],
@@ -416,58 +366,6 @@ class LiteLLMStructuredVisionAdapter:
     @staticmethod
     def _log_dir() -> Path:
         return Path(__file__).resolve().parents[3] / "logs" / "vlm"
-
-
-def _extract_content_from_chat_completion(raw: str) -> str:
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw.strip()
-
-    choices = payload.get("choices", [])
-    if not choices:
-        return ""
-    message = choices[0].get("message", {})
-    content = message.get("content", "")
-    if isinstance(content, list):
-        chunks: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                chunks.append(str(item.get("text", "")))
-        content = "\n".join(chunks).strip()
-    else:
-        content = str(content).strip()
-
-    # Some reasoning model proxies (e.g. kr777.top) ignore thinking=disabled and
-    # return an empty content with the actual answer buried in reasoning_content.
-    # Fall back to reasoning_content when content is empty.
-    if not content:
-        reasoning = message.get("reasoning_content", "") or ""
-        content = str(reasoning).strip()
-
-    return content
-
-
-def _compact_error_body(raw: str) -> str:
-    text = raw.strip()
-    if not text:
-        return ""
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return text
-
-    error = payload.get("error")
-    if isinstance(error, dict):
-        message = str(error.get("message", "")).strip()
-        code = str(error.get("code", "")).strip()
-        type_ = str(error.get("type", "")).strip()
-        parts = [part for part in [type_, code, message] if part]
-        if parts:
-            return ":".join(parts)
-    return text
-
-
 def _to_float(value: str | None) -> float | None:
     if value is None:
         return None
