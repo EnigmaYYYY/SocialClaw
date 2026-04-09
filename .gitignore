@@ -3,6 +3,7 @@
 .socialclaw-logs/
 .socialclaw/
 memory/cache/
+social_copilot/cache/
 memory/chat_records/
 memory/memory_library/
 memory/evermemos/tmp_*
