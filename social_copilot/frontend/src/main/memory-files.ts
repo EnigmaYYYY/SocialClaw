@@ -6,9 +6,8 @@ import type { AppSettings } from '../models/schemas'
 
 export type MemorySectionId =
   | 'inbox'
-  | 'today-clues'
+  | 'today-messages'
   | 'long-term-memory'
-  | 'relationship-clues'
 
 export interface MemorySectionOverview {
   id: MemorySectionId
@@ -25,6 +24,7 @@ export interface MemoryFileListItem {
   titleMeta?: string | null
   relativePath: string
   updatedAt: string
+  lastMessageAt?: string | null
   sizeLabel: string
   tags: string[]
 }
@@ -71,6 +71,7 @@ interface CollectedFile {
   relativePath: string
   updatedAt: string
   updatedAtMs: number
+  lastMessageAt?: string | null
   sizeBytes: number
   sizeLabel: string
   tags: string[]
@@ -82,20 +83,15 @@ export const SECTION_META: Record<MemorySectionId, Omit<MemorySectionOverview, '
     title: '收件箱',
     description: '最近写入的聊天、画像与线索文件'
   },
-  'today-clues': {
-    id: 'today-clues',
-    title: '今日线索',
-    description: '今天新增或更新的线索文件'
+  'today-messages': {
+    id: 'today-messages',
+    title: '今日消息',
+    description: '今天新增或更新的消息文件'
   },
   'long-term-memory': {
     id: 'long-term-memory',
     title: '长期记忆',
     description: '联系人画像、自我画像与沉淀记忆'
-  },
-  'relationship-clues': {
-    id: 'relationship-clues',
-    title: '关系线索',
-    description: '和关系、画像、联系人相关的文件'
   }
 }
 
@@ -217,11 +213,10 @@ async function collectGroupedFiles(
 
   const grouped: Record<MemorySectionId, CollectedFile[]> = {
     inbox: files.filter((item) => item.source === 'chat_records'),
-    'today-clues': files.filter(
+    'today-messages': files.filter(
       (item) => item.source === 'chat_records' && isSameLocalDate(item.updatedAtMs, now)
     ),
-    'long-term-memory': files.filter((item) => item.source !== 'chat_records'),
-    'relationship-clues': files.filter((item) => looksLikeRelationshipFile(item))
+    'long-term-memory': files.filter((item) => item.source !== 'chat_records')
   }
 
   return grouped
@@ -251,6 +246,7 @@ async function collectFiles(settings: AppSettings, ownerUserId?: string): Promis
         relativePath: relative(root.rootPath, entryPath) || basename(entryPath),
         updatedAt: fileStat.mtime.toISOString(),
         updatedAtMs: fileStat.mtime.getTime(),
+        lastMessageAt: summary.lastMessageAt ?? null,
         sizeBytes: fileStat.size,
         sizeLabel: formatBytes(fileStat.size),
         tags: summary.tags
@@ -360,7 +356,7 @@ function summarizeFileContent(
   filePath: string,
   rawContent: string,
   ownerUserId?: string
-): { title: string; summary: string; titleMeta?: string | null; tags: string[]; content: string; bubbles?: ChatBubble[]; skip: boolean } {
+): { title: string; summary: string; titleMeta?: string | null; tags: string[]; content: string; bubbles?: ChatBubble[]; lastMessageAt?: string | null; skip: boolean } {
   if (isInternalMemoryArtifact(basename(filePath))) {
     return {
       title: basename(filePath, extname(filePath)),
@@ -422,6 +418,7 @@ function summarizeFileContent(
             tags: Array.from(tags),
             content: buildChatTranscript(parsed),
             bubbles: buildChatBubbles(parsed),
+            lastMessageAt: findLastMessageTimestamp(parsed.messages),
             skip: false
           }
         }
@@ -755,17 +752,29 @@ function findLastMessageText(messages: unknown[]): string {
   return ''
 }
 
+function findLastMessageTimestamp(messages: unknown[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message || typeof message !== 'object') {
+      continue
+    }
+    const row = message as Record<string, unknown>
+    if (typeof row.timestamp === 'string' && row.timestamp.trim().length > 0) {
+      const date = new Date(row.timestamp)
+      if (!Number.isNaN(date.getTime())) {
+        return row.timestamp
+      }
+    }
+  }
+  return null
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
-}
-
-function looksLikeRelationshipFile(item: CollectedFile): boolean {
-  const haystack = `${item.relativePath} ${item.title} ${item.summary} ${item.tags.join(' ')}`.toLowerCase()
-  return /(relationship|profile|contact|friend|关系|联系人|画像)/i.test(haystack)
 }
 
 function isSameLocalDate(timestampMs: number, now: Date): boolean {
@@ -786,6 +795,7 @@ function toListItem(item: CollectedFile): MemoryFileListItem {
     titleMeta: item.titleMeta ?? null,
     relativePath: item.relativePath,
     updatedAt: item.updatedAt,
+    lastMessageAt: item.lastMessageAt ?? null,
     sizeLabel: item.sizeLabel,
     tags: item.tags
   }

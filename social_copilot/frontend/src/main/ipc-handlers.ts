@@ -108,6 +108,7 @@ const DEFAULT_PROFILE_BACKFILL_CHUNK_SIZE = 20
 const DEFAULT_PROFILE_BACKFILL_MIN_CHUNK_SIZE = 5
 const DEFAULT_PROFILE_BACKFILL_CHUNK_TIMEOUT_MS = 60_000
 const DEFAULT_PROFILE_BACKFILL_MAX_RETRY_PER_CHUNK = 1
+type LegacyMemorySectionId = 'today-clues' | 'relationship-clues'
 
 let cachedUserProfile: { ownerUserId: string; profile: UnifiedProfile; fetchedAt: number } | null = null
 const cachedContactProfiles = new Map<string, { profile: UnifiedProfile | null; fetchedAt: number }>()
@@ -2047,9 +2048,10 @@ async function handleMemoryFilesGetOverview(): Promise<MemorySectionOverview[]> 
 
 async function handleMemoryFilesGetSection(
   _event: Electron.IpcMainInvokeEvent,
-  sectionId: MemorySectionId,
+  sectionIdRaw: MemorySectionId | LegacyMemorySectionId | string,
   searchQuery?: string
 ): Promise<MemoryFileSection> {
+  const sectionId = normalizeMemorySectionId(sectionIdRaw)
   const settings = await memoryManager.loadSettings()
   const chatRecordsDir = settings.storagePaths.chatRecordsDir
   const ownerUserId = settings.evermemos.ownerUserId
@@ -2090,6 +2092,19 @@ async function handleMemoryFilesGetSection(
   }
 
   return section
+}
+
+function normalizeMemorySectionId(sectionIdRaw: MemorySectionId | LegacyMemorySectionId | string): MemorySectionId {
+  if (sectionIdRaw === 'today-clues') {
+    return 'today-messages'
+  }
+  if (sectionIdRaw === 'relationship-clues') {
+    throw new Error('section_removed:relationship-clues')
+  }
+  if (sectionIdRaw in SECTION_META) {
+    return sectionIdRaw as MemorySectionId
+  }
+  throw new Error(`memory_section_unknown:${sectionIdRaw}`)
 }
 
 async function handleMemoryFilesReadItem(

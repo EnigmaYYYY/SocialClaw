@@ -108,6 +108,13 @@ body {
   height: auto;
 }
 
+/* ── Chat-view scoped scroll layout ── */
+.memory-chat-view {
+  flex: 1 1 0;
+  gap: 0;
+  overflow: hidden;
+}
+
 .console-header {
   display: flex;
   align-items: flex-start;
@@ -576,6 +583,14 @@ body {
   overflow: visible;
 }
 
+.memory-chat-view .memory-browser-card {
+  flex: 1 1 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .memory-browser-layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
@@ -584,6 +599,12 @@ body {
   padding-bottom: 12px;
   overflow: hidden;
   align-items: start;
+}
+
+.memory-chat-view .memory-browser-layout {
+  flex: 1 1 0;
+  padding-bottom: 0;
+  align-items: stretch;
 }
 
 .profile-browser-card {
@@ -607,6 +628,27 @@ body {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: visible;
+}
+
+.memory-chat-view .memory-item-list {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.memory-chat-view .memory-item-list .chat-list-header {
+  flex-shrink: 0;
+}
+
+.memory-item-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 14px 28px;
 }
 
 .profile-item-list {
@@ -1116,6 +1158,68 @@ body {
   overflow-x: hidden;
   overflow-y: visible;
   overscroll-behavior-y: auto;
+}
+
+.memory-chat-view .memory-detail-panel {
+  padding: 16px 0 0 18px;
+  gap: 0;
+  align-self: stretch;
+  overflow: hidden;
+}
+
+.memory-chat-view .chat-detail-header,
+.memory-chat-view .chat-bubble-selection-bar {
+  padding-right: 18px;
+}
+
+.memory-detail-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 18px 28px 0;
+}
+
+/* ── Profile-view scoped scroll layout ── */
+
+/* 分栏卡片：触顶粘住，高度 = 视口 - console-main 上下 padding(44px) */
+.memory-profile-view .memory-browser-card {
+  position: sticky;
+  top: 0;
+  height: calc(100vh - 44px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 分栏布局：填满卡片，两栏等高 */
+.memory-profile-view .memory-browser-layout {
+  flex: 1 1 0;
+  min-height: 0;
+  align-items: stretch;
+  padding-bottom: 0;
+}
+
+/* 左栏：独立滚动 */
+.memory-profile-view .memory-item-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+
+/* 右栏：独立滚动，撑满高度；去掉 padding-top 避免吸顶留白 */
+.memory-profile-view .memory-detail-panel {
+  align-self: stretch;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 0;
+}
+
+/* sticky header：容器内滚动，margin-top 归零，top: 0 */
+.memory-profile-view .profile-sticky-header {
+  top: 0;
+  margin-top: 0;
 }
 
 .profile-detail-panel {
@@ -2300,10 +2404,18 @@ select.profile-basic-input { cursor: pointer; }
     height: auto;
   }
 
+  .memory-browser-layout {
+    grid-template-columns: 1fr;
+  }
+
   .memory-item-list {
     border-right: none;
     border-bottom: 1px solid #e4e4e7;
     border-top-right-radius: 18px;
+    max-height: 280px;
+  }
+
+  .memory-item-scroll {
     max-height: 280px;
   }
 
@@ -2317,6 +2429,11 @@ select.profile-basic-input { cursor: pointer; }
     max-height: none;
     overflow-y: visible;
     overscroll-behavior-y: auto;
+  }
+
+  .memory-detail-scroll {
+    overflow-y: visible;
+    padding-bottom: 28px;
   }
 
   .memory-detail-stats {

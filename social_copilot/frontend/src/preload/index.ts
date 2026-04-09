@@ -201,9 +201,8 @@ export interface AssistantWindowBounds {
 
 export type MemorySectionId =
   | 'inbox'
-  | 'today-clues'
+  | 'today-messages'
   | 'long-term-memory'
-  | 'relationship-clues'
   | 'wechat-chat-notes'
   | 'history-archive'
 

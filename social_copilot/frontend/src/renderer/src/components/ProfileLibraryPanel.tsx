@@ -1412,7 +1412,7 @@ export function ProfileLibraryPanel({
   }
 
   return (
-    <div className="memory-library-shell">
+    <div className="memory-library-shell memory-profile-view">
       {/* 卡片 1：导入区 */}
       <section className="console-card">
         <div className="memory-upload-header">

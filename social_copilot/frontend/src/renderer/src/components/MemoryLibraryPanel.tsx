@@ -358,7 +358,7 @@ function FileMemoryLibraryPanel({
   }
 
   return (
-    <div className="memory-library-shell">
+    <div className="memory-library-shell memory-chat-view">
       <section className="console-card memory-browser-card">
         {loading && <p style={{ padding: '16px' }}>正在加载记忆文件...</p>}
         {!loading && error && (
@@ -403,61 +403,63 @@ function FileMemoryLibraryPanel({
                 )}
               </div>
 
-              {filteredItems.length === 0 ? (
-                <p style={{ margin: '8px 14px', color: '#71717a', fontSize: 13 }}>
-                  {searchQuery.trim() ? '没有匹配的记录。' : '当前栏目还没有可展示的记录。'}
-                </p>
-              ) : null}
+              <div className="memory-item-scroll">
+                {filteredItems.length === 0 ? (
+                  <p style={{ margin: '4px 0', color: '#71717a', fontSize: 13 }}>
+                    {searchQuery.trim() ? '没有匹配的记录。' : '当前栏目还没有可展示的记录。'}
+                  </p>
+                ) : null}
 
-              {filteredItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`memory-item-button ${item.path === selectedPath ? 'active' : ''} ${
-                    selectedPaths.includes(item.path) ? 'selected' : ''
-                  }`}
-                  onClick={() => {
-                    setMenu(null)
-                    setSelectedPath(item.path)
-                  }}
-                  onMouseDown={(event) => {
-                    if (event.button !== 2) return
-                    event.preventDefault()
-                    openContextMenu(event, item)
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault()
-                    openContextMenu(event, item)
-                  }}
-                  disabled={deletingPaths.includes(item.path)}
-                >
-                  {selectionMode && (
-                    <label
-                      className="memory-item-floating-check"
-                      onClick={(event) => event.stopPropagation()}
-                      onMouseDown={(event) => event.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedPaths.includes(item.path)}
-                        onChange={() => togglePathSelection(item.path)}
-                      />
-                    </label>
-                  )}
-                  <div className="memory-item-title-row">
-                    <strong>{item.title}</strong>
-                    <div className="memory-item-head-actions">
-                      <span>{formatTimestamp(item.updatedAt)}</span>
+                {filteredItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`memory-item-button ${item.path === selectedPath ? 'active' : ''} ${
+                      selectedPaths.includes(item.path) ? 'selected' : ''
+                    }`}
+                    onClick={() => {
+                      setMenu(null)
+                      setSelectedPath(item.path)
+                    }}
+                    onMouseDown={(event) => {
+                      if (event.button !== 2) return
+                      event.preventDefault()
+                      openContextMenu(event, item)
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      openContextMenu(event, item)
+                    }}
+                    disabled={deletingPaths.includes(item.path)}
+                  >
+                    {selectionMode && (
+                      <label
+                        className="memory-item-floating-check"
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPaths.includes(item.path)}
+                          onChange={() => togglePathSelection(item.path)}
+                        />
+                      </label>
+                    )}
+                    <div className="memory-item-title-row">
+                      <strong>{item.title}</strong>
+                      <div className="memory-item-head-actions">
+                        <span>{formatTimestamp(item.lastMessageAt ?? item.updatedAt)}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="memory-tag-row">
-                    {item.summary ? <em>{item.summary}</em> : null}
-                    {item.titleMeta ? <em>{item.titleMeta}</em> : null}
-                    <em>{item.sizeLabel}</em>
-                    {deletingPaths.includes(item.path) ? <em>删除中...</em> : null}
-                  </div>
-                </button>
-              ))}
+                    <div className="memory-tag-row">
+                      {item.summary ? <em>{item.summary}</em> : null}
+                      {item.titleMeta ? <em>{item.titleMeta}</em> : null}
+                      <em>{item.sizeLabel}</em>
+                      {deletingPaths.includes(item.path) ? <em>删除中...</em> : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* ── 右侧详情 ── */}
@@ -519,19 +521,21 @@ function FileMemoryLibraryPanel({
                       )}
                     </div>
                   )}
-                  {detailLoading ? (
-                    <p style={{ color: '#71717a', fontSize: 13 }}>正在读取详情...</p>
-                  ) : detail.bubbles && detail.bubbles.length > 0 ? (
-                    <ChatBubbleList
-                      bubbles={detail.bubbles}
-                      selectionMode={bubbleSelectionMode}
-                      selectedIndices={selectedBubbleIndices}
-                      onToggleSelect={toggleBubbleIndex}
-                      onContextMenu={(sourceIndex, x, y) => setBubbleMenu({ x, y, sourceIndex })}
-                    />
-                  ) : (
-                    <pre className="memory-detail-content">{detail.content}</pre>
-                  )}
+                  <div className="memory-detail-scroll">
+                    {detailLoading ? (
+                      <p style={{ color: '#71717a', fontSize: 13 }}>正在读取详情...</p>
+                    ) : detail.bubbles && detail.bubbles.length > 0 ? (
+                      <ChatBubbleList
+                        bubbles={detail.bubbles}
+                        selectionMode={bubbleSelectionMode}
+                        selectedIndices={selectedBubbleIndices}
+                        onToggleSelect={toggleBubbleIndex}
+                        onContextMenu={(sourceIndex, x, y) => setBubbleMenu({ x, y, sourceIndex })}
+                      />
+                    ) : (
+                      <pre className="memory-detail-content">{detail.content}</pre>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -579,7 +583,9 @@ function formatTimestamp(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return '--'
   }
+  const isCurrentYear = date.getFullYear() === new Date().getFullYear()
   return new Intl.DateTimeFormat('zh-CN', {
+    ...(isCurrentYear ? {} : { year: 'numeric' }),
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

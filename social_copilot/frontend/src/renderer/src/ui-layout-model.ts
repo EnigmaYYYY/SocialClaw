@@ -15,9 +15,8 @@ export interface SuggestionMessage {
 
 const MEMORY_FOLDERS: ReadonlyArray<MemoryFolderItem> = [
   { id: 'inbox', name: '收件箱', count: 12, group: 'system' },
-  { id: 'today-clues', name: '今日线索', count: 4, group: 'system' },
-  { id: 'long-term-memory', name: '长期记忆', count: 36, group: 'project' },
-  { id: 'relationship-clues', name: '关系线索', count: 8, group: 'project' }
+  { id: 'today-messages', name: '今日消息', count: 4, group: 'system' },
+  { id: 'long-term-memory', name: '长期记忆', count: 36, group: 'project' }
 ]
 
 const INITIAL_SUGGESTIONS: ReadonlyArray<SuggestionMessage> = [
@@ -55,3 +54,4 @@ export function createInitialSuggestionMessages(): SuggestionMessage[] {
 export function getModeLabel(mode: RoiMode): string {
   return MODE_LABELS[mode]
 }
+
