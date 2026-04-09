@@ -244,7 +244,7 @@ npm run stop
 如果后续你通过 npm 全局安装这个 launcher，可以直接这样用：
 
 ```bash
-npm install -g socialclaw
+npm install -g @enigmayyy/socialclaw
 socialclaw init
 socialclaw doctor
 socialclaw start

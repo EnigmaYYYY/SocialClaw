@@ -234,7 +234,7 @@ That means the default path no longer requires filling two `.env` files with mod
 If you install the launcher globally from npm, the default flow becomes:
 
 ```bash
-npm install -g socialclaw
+npm install -g @enigmayyy/socialclaw
 socialclaw init
 socialclaw doctor
 socialclaw start

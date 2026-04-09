@@ -1,5 +1,5 @@
 {
-  "name": "socialclaw",
+  "name": "@enigmayyy/socialclaw",
   "version": "1.0.0",
   "description": "CLI launcher for the SocialClaw desktop stack",
   "keywords": [
@@ -17,7 +17,9 @@
   "bugs": {
     "url": "https://github.com/EnigmaYYYY/SocialClaw/issues"
   },
-  "bin": "bin/socialclaw.js",
+  "bin": {
+    "socialclaw": "./bin/socialclaw.js"
+  },
   "scripts": {
     "doctor": "node ./bin/socialclaw.js doctor",
     "init": "node ./bin/socialclaw.js init",
