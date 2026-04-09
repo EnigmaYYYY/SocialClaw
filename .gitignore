@@ -3,7 +3,8 @@
 .socialclaw-logs/
 .socialclaw/
 memory/cache/
-social_copilot/cache/
+social_copilot/cache/*
+!social_copilot/cache/.gitkeep
 memory/chat_records/
 memory/memory_library/
 memory/evermemos/tmp_*
