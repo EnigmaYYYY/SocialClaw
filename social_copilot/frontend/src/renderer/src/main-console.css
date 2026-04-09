@@ -955,24 +955,20 @@ body {
 }
 
 .chat-time-divider {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: #a1a1aa;
   margin: 10px 0;
-  position: relative;
 }
 
 .chat-time-divider::before,
 .chat-time-divider::after {
   content: '';
-  position: absolute;
-  top: 50%;
-  width: calc(50% - 36px);
+  flex: 1;
   border-top: 1px solid #e4e4e7;
 }
-
-.chat-time-divider::before { left: 0; }
-.chat-time-divider::after { right: 0; }
 
 .chat-bubble {
   display: flex;
@@ -1051,6 +1047,57 @@ body {
   color: #18181b;
   border: 1px solid #e4e4e7;
   border-bottom-left-radius: 4px;
+}
+
+/* ── Bubble selection toolbar ── */
+.chat-bubble-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+/* ── Bubble selection mode ── */
+.chat-bubble-selectable {
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 2px 4px;
+  transition: background 0.12s;
+  position: relative;
+}
+
+.chat-bubble-selectable:hover {
+  background: rgba(99, 102, 241, 0.07);
+}
+
+.chat-bubble-selected {
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 10px;
+  padding: 2px 4px;
+}
+
+.chat-bubble-selected .chat-bubble-text {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.chat-bubble-checkbox {
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  z-index: 1;
+  accent-color: #2563eb;
+}
+
+.chat-bubble-me .chat-bubble-checkbox {
+  left: auto;
+  right: -4px;
 }
 
 .memory-detail-panel {

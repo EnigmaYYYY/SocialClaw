@@ -48,6 +48,7 @@ import {
   loadMemorySection,
   readMemoryItem,
   deleteMemoryItem,
+  deleteMessagesFromItem,
   type MemorySectionId,
   type MemorySectionOverview,
   type MemoryFileSection,
@@ -406,6 +407,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('memoryfiles:getSection', handleMemoryFilesGetSection)
   ipcMain.handle('memoryfiles:readItem', handleMemoryFilesReadItem)
   ipcMain.handle('memoryfiles:deleteItem', handleMemoryFilesDeleteItem)
+  ipcMain.handle('memoryfiles:deleteMessages', handleMemoryFilesDeleteMessages)
   ipcMain.handle('memoryfiles:markSessionDirty', handleMemoryFilesMarkSessionDirty)
 
   // Maintenance handlers (maintenance:*)
@@ -486,6 +488,7 @@ export function unregisterIpcHandlers(): void {
   ipcMain.removeHandler('memoryfiles:getSection')
   ipcMain.removeHandler('memoryfiles:readItem')
   ipcMain.removeHandler('memoryfiles:deleteItem')
+  ipcMain.removeHandler('memoryfiles:deleteMessages')
   ipcMain.removeHandler('memoryfiles:markSessionDirty')
   ipcMain.removeHandler('maintenance:cleanupLocalData')
 
@@ -2105,6 +2108,16 @@ async function handleMemoryFilesDeleteItem(
   const settings = await memoryManager.loadSettings()
   await deleteMemoryItem(settings, itemPath)
   // Clear cache after deletion
+  cachedMemorySections = null
+}
+
+async function handleMemoryFilesDeleteMessages(
+  _event: Electron.IpcMainInvokeEvent,
+  itemPath: string,
+  sourceIndices: number[]
+): Promise<void> {
+  const settings = await memoryManager.loadSettings()
+  await deleteMessagesFromItem(settings, itemPath, sourceIndices)
   cachedMemorySections = null
 }
 

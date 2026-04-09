@@ -1252,6 +1252,28 @@ export function MainConsoleApp(): JSX.Element {
                 )}
               </div>
               <div className="settings-row">
+                <label htmlFor="evermemos-vectorize-enabled">启用向量化</label>
+                <select
+                  id="evermemos-vectorize-enabled"
+                  value={settings.evermemos.vectorize.enabled ? 'enabled' : 'disabled'}
+                  onChange={(event) =>
+                    updateSettings((previous) => ({
+                      ...previous,
+                      evermemos: {
+                        ...previous.evermemos,
+                        vectorize: {
+                          ...previous.evermemos.vectorize,
+                          enabled: event.target.value === 'enabled'
+                        }
+                      }
+                    }))
+                  }
+                >
+                  <option value="disabled">关闭（不进行向量化）</option>
+                  <option value="enabled">开启</option>
+                </select>
+              </div>
+              <div className="settings-row">
                 <label htmlFor="evermemos-vectorize-base-url">Vectorize 地址</label>
                 <input
                   id="evermemos-vectorize-base-url"

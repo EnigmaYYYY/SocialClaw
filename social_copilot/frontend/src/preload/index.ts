@@ -760,6 +760,7 @@ export interface MemoryFilesAPI {
   getSection: (sectionId: MemorySectionId, searchQuery?: string) => Promise<MemoryFileSection>
   readItem: (itemPath: string) => Promise<MemoryFileDetail>
   deleteItem: (itemPath: string) => Promise<void>
+  deleteMessages: (itemPath: string, sourceIndices: number[]) => Promise<void>
   // Mark a session as having new messages (needs refresh)
   markSessionDirty: (sessionKey: string) => Promise<void>
 }
@@ -1294,6 +1295,9 @@ const memoryFilesAPI: MemoryFilesAPI = {
 
   deleteItem: (itemPath: string): Promise<void> =>
     ipcRenderer.invoke('memoryfiles:deleteItem', itemPath),
+
+  deleteMessages: (itemPath: string, sourceIndices: number[]): Promise<void> =>
+    ipcRenderer.invoke('memoryfiles:deleteMessages', itemPath, sourceIndices),
 
   markSessionDirty: (sessionKey: string): Promise<void> =>
     ipcRenderer.invoke('memoryfiles:markSessionDirty', sessionKey)

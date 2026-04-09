@@ -518,3 +518,10 @@ async def get_text_embedding_with_usage(
     return await get_vectorize_service().get_embedding_with_usage(
         text, instruction, is_query
     )
+
+
+def set_vectorize_disabled(disabled: bool) -> None:
+    """在运行时动态设置向量化服务的 disabled 状态（无需重启）"""
+    svc = get_vectorize_service()
+    svc.config.disabled = disabled
+    logger.info(f"[VectorizeService] Runtime disabled state set to: {disabled}")

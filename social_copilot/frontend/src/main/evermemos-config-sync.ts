@@ -25,7 +25,8 @@ export function buildEverMemOSConfigSyncRequests(settings: AppSettings): EverMem
       payload: {
         base_url: settings.evermemos.vectorize.baseUrl,
         api_key: settings.evermemos.vectorize.apiKey,
-        model: settings.evermemos.vectorize.model
+        model: settings.evermemos.vectorize.model,
+        disabled: !settings.evermemos.vectorize.enabled
       }
     },
     {

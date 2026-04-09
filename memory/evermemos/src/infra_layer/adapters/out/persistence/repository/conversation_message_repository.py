@@ -102,6 +102,19 @@ class ConversationMessageRepository(BaseRepository[ConversationMessageDocument])
             )
             return 0
 
+    async def delete_by_message_ids(self, message_ids: List[str]) -> int:
+        """Delete specific messages from the archive by their message_ids."""
+        if not message_ids:
+            return 0
+        try:
+            result = await self.model.find({"message_id": {"$in": message_ids}}).delete()
+            count = result.deleted_count if result else 0
+            logger.info("Deleted %d conversation messages by message_ids", count)
+            return count
+        except Exception as e:
+            logger.error("Failed to delete conversation messages by message_ids: %s", e)
+            return 0
+
     def _message_to_document(
         self,
         owner_user_id: str,

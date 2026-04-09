@@ -879,6 +879,7 @@ export const LLMConfigSchema = z.object({
 export type LLMConfig = z.infer<typeof LLMConfigSchema>
 
 export const VectorizeConfigSchema = z.object({
+  enabled: z.boolean().default(true),
   baseUrl: z.string().default(''),
   apiKey: z.string().default(''),
   model: z.string().default('Qwen/Qwen3-Embedding-4B')
@@ -912,6 +913,7 @@ export const EverMemOSSettingsSchema = z.object({
   }),
   // 向量化配置
   vectorize: VectorizeConfigSchema.default({
+    enabled: true,
     baseUrl: '',
     apiKey: '',
     model: 'Qwen/Qwen3-Embedding-4B'
@@ -1020,6 +1022,7 @@ export const AppSettingsSchema = z.object({
       { userId: '🌟', displayName: '🌟' }
     ],
     vectorize: {
+      enabled: true,
       baseUrl: '',
       apiKey: '',
       model: 'Qwen/Qwen3-Embedding-4B'
@@ -1121,6 +1124,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       maxTokens: 8192
     },
     vectorize: {
+      enabled: true,
       baseUrl: '',
       apiKey: '',
       model: 'Qwen/Qwen3-Embedding-4B'

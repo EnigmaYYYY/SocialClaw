@@ -700,6 +700,18 @@ function EverMemOSSettings({
       {/* Vectorize Configuration */}
       <div className="settings-group">
         <h3 className="settings-group-title">向量化配置</h3>
+        <div className="settings-toggle-row">
+          <span className="toggle-label">启用向量化</span>
+          <button
+            type="button"
+            className={`toggle-switch ${settings.evermemos.vectorize.enabled ? 'active' : ''}`}
+            onClick={() => updateVectorize('enabled', !settings.evermemos.vectorize.enabled)}
+            aria-pressed={settings.evermemos.vectorize.enabled}
+            aria-label="切换向量化启用状态"
+          >
+            <span className="toggle-slider" />
+          </button>
+        </div>
         <p className="settings-group-desc">
           配置 EverMemOS 使用的向量化模型参数
         </p>

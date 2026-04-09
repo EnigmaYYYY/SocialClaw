@@ -1,4 +1,4 @@
-import { access, readFile, readdir, rm, stat } from 'fs/promises'
+import { access, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { constants } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
@@ -37,6 +37,7 @@ export interface MemoryFileSection {
 }
 
 export interface ChatBubble {
+  sourceIndex: number
   sender: 'user' | 'contact' | 'unknown'
   name: string
   text: string
@@ -172,6 +173,39 @@ export async function deleteMemoryItem(
 
   await rm(resolvedTargetPath, { force: false })
   await pruneEmptyParents(dirname(resolvedTargetPath), owningRoot)
+}
+
+export async function deleteMessagesFromItem(
+  settings: AppSettings,
+  targetPath: string,
+  sourceIndices: number[]
+): Promise<void> {
+  if (sourceIndices.length === 0) {
+    return
+  }
+  const allowedRoots = getAllowedRoots(settings)
+  const resolvedTargetPath = resolvePath(targetPath)
+  const isAllowed = allowedRoots.some((rootPath) => isSubPathOf(resolvedTargetPath, rootPath))
+  if (!isAllowed) {
+    throw new Error('memory_file_access_denied')
+  }
+
+  const rawContent = await readFile(resolvedTargetPath, 'utf-8')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawContent)
+  } catch {
+    throw new Error('memory_file_not_json')
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.messages)) {
+    throw new Error('memory_file_no_messages')
+  }
+
+  const indicesSet = new Set(sourceIndices)
+  parsed.messages = (parsed.messages as unknown[]).filter((_, i) => !indicesSet.has(i))
+
+  await writeFile(resolvedTargetPath, JSON.stringify(parsed, null, 2), 'utf-8')
 }
 
 async function collectGroupedFiles(
@@ -522,8 +556,8 @@ function buildChatBubbles(parsed: Record<string, unknown>): ChatBubble[] {
   const sessionName = typeof parsed.session_name === 'string' ? parsed.session_name : 'Contact'
   const messages = Array.isArray(parsed.messages) ? parsed.messages : []
   return messages
-    .filter(isRecord)
-    .map((msg): ChatBubble | null => {
+    .map((msg, index): ChatBubble | null => {
+      if (!isRecord(msg)) return null
       const metadata = isRecord(msg.metadata) ? msg.metadata : null
       const rawText = typeof msg.content === 'string' ? msg.content.trim()
         : typeof msg.text === 'string' ? msg.text.trim() : ''
@@ -540,7 +574,7 @@ function buildChatBubbles(parsed: Record<string, unknown>): ChatBubble[] {
         ? metadata.contact_name.trim() : '')
       const name = sender === 'user' ? (senderName || 'Me') : (contactName || sessionName)
       const timestamp = typeof msg.timestamp === 'string' ? msg.timestamp : null
-      return { sender, name, text, timestamp }
+      return { sourceIndex: index, sender, name, text, timestamp }
     })
     .filter((b): b is ChatBubble => b !== null)
 }

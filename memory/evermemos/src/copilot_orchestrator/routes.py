@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from api_specs.unified_types import (
     MemorizeRequest,
@@ -1646,7 +1647,33 @@ async def update_vectorize_config(request: Dict[str, Any]) -> Dict[str, Any]:
             "api_key": "VECTORIZE_API_KEY",
             "model": "VECTORIZE_MODEL"
         }
-        return _update_env_config(request, config_mapping, "Vectorize")
+        result = _update_env_config(request, config_mapping, "Vectorize")
+
+        # 处理 disabled 开关（bool → "1"/"0"，写 .env 并即时生效）
+        if "disabled" in request:
+            disabled_val = bool(request["disabled"])
+            env_str = "1" if disabled_val else "0"
+            os.environ["VECTORIZE_DISABLED"] = env_str
+            env_path = _get_env_file_path()
+            env_lines: list[str] = []
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    env_lines = f.readlines()
+            found = False
+            for i, line in enumerate(env_lines):
+                if line.strip().startswith("VECTORIZE_DISABLED="):
+                    env_lines[i] = f"VECTORIZE_DISABLED={env_str}\n"
+                    found = True
+                    break
+            if not found:
+                env_lines.append(f"VECTORIZE_DISABLED={env_str}\n")
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(env_lines)
+            from agentic_layer.vectorize_service import set_vectorize_disabled
+            set_vectorize_disabled(disabled_val)
+            logger.info(f"[Config] Vectorize disabled set to: {disabled_val}")
+
+        return result
     except Exception as exc:
         logger.error(f"[Config] Failed to update Vectorize config: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1930,3 +1957,16 @@ async def import_chat_history_stream(request: Dict[str, Any]) -> StreamingRespon
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(generate_progress(), media_type="text/event-stream")
+
+
+class DeleteMessagesRequest(BaseModel):
+    message_ids: List[str]
+
+
+@router.delete("/messages")
+async def delete_messages(request: DeleteMessagesRequest):
+    """Delete specific conversation messages by message_id."""
+    if not request.message_ids:
+        raise HTTPException(status_code=400, detail="message_ids cannot be empty")
+    deleted = await _get_conversation_message_repo().delete_by_message_ids(request.message_ids)
+    return {"deleted": deleted}

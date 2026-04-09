@@ -21,6 +21,12 @@ interface ContextMenuState {
   item: MemoryFileListItem
 }
 
+interface BubbleMenuState {
+  x: number
+  y: number
+  sourceIndex: number
+}
+
 export function MemoryLibraryPanel({
   sectionId,
   ownerUserId,
@@ -68,6 +74,12 @@ function FileMemoryLibraryPanel({
   const [menu, setMenu] = useState<ContextMenuState | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedPaths, setSelectedPaths] = useState<string[]>([])
+
+  // Bubble-level state
+  const [bubbleSelectionMode, setBubbleSelectionMode] = useState(false)
+  const [selectedBubbleIndices, setSelectedBubbleIndices] = useState<number[]>([])
+  const [bubbleMenu, setBubbleMenu] = useState<BubbleMenuState | null>(null)
+  const [deletingBubbles, setDeletingBubbles] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -183,6 +195,14 @@ function FileMemoryLibraryPanel({
     }
   }, [selectedPath])
 
+  // Reset bubble state when switching conversations
+  useEffect(() => {
+    setBubbleSelectionMode(false)
+    setSelectedBubbleIndices([])
+    setBubbleMenu(null)
+  }, [selectedPath])
+
+  // Close list context menu on outside click/escape
   useEffect(() => {
     if (!menu) {
       return undefined
@@ -203,6 +223,27 @@ function FileMemoryLibraryPanel({
     }
   }, [menu])
 
+  // Close bubble context menu on outside click/escape
+  useEffect(() => {
+    if (!bubbleMenu) {
+      return undefined
+    }
+    const closeMenu = (): void => setBubbleMenu(null)
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeMenu()
+      }
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [bubbleMenu])
+
   const openContextMenu = (
     event: Pick<MouseEvent, 'clientX' | 'clientY'> | ReactMouseEvent<HTMLButtonElement>,
     item: MemoryFileListItem
@@ -219,7 +260,7 @@ function FileMemoryLibraryPanel({
     if (items.length === 0) {
       return
     }
-    const targetLabel = items.length === 1 ? `“${items[0]?.title ?? ''}”` : `选中的 ${items.length} 条记录`
+    const targetLabel = items.length === 1 ? `"${items[0]?.title ?? ''}"` : `选中的 ${items.length} 条记录`
     if (!window.confirm(`删除${targetLabel}？`)) {
       return
     }
@@ -272,6 +313,48 @@ function FileMemoryLibraryPanel({
     }
     const items = section.items.filter((item) => selectedPaths.includes(item.path))
     await deleteItems(items)
+  }
+
+  const deleteBubbles = async (sourceIndices: number[]): Promise<void> => {
+    if (!detail || sourceIndices.length === 0) {
+      return
+    }
+    const label = sourceIndices.length === 1 ? '这条消息' : `选中的 ${sourceIndices.length} 条消息`
+    if (!window.confirm(`删除${label}？`)) {
+      return
+    }
+    setDeletingBubbles(true)
+    setBubbleMenu(null)
+    try {
+      await window.electronAPI.memoryFiles.deleteMessages(detail.path, sourceIndices)
+      setSelectedBubbleIndices([])
+      setBubbleSelectionMode(false)
+      const updated = await window.electronAPI.memoryFiles.readItem(detail.path)
+      setDetail(updated)
+      await onRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '消息删除失败')
+    } finally {
+      setDeletingBubbles(false)
+    }
+  }
+
+  const toggleBubbleSelectionMode = (): void => {
+    setBubbleSelectionMode((current) => {
+      if (current) {
+        setSelectedBubbleIndices([])
+      }
+      return !current
+    })
+    setBubbleMenu(null)
+  }
+
+  const toggleBubbleIndex = (sourceIndex: number): void => {
+    setSelectedBubbleIndices((current) =>
+      current.includes(sourceIndex)
+        ? current.filter((i) => i !== sourceIndex)
+        : [...current, sourceIndex]
+    )
   }
 
   return (
@@ -392,6 +475,16 @@ function FileMemoryLibraryPanel({
                       </span>
                     </div>
                     <div className="chat-detail-header-actions">
+                      {detail.bubbles && detail.bubbles.length > 0 && (
+                        <button
+                          type="button"
+                          className="memory-refresh-btn"
+                          onClick={toggleBubbleSelectionMode}
+                          disabled={deletingBubbles}
+                        >
+                          {bubbleSelectionMode ? '取消选择' : '选择消息'}
+                        </button>
+                      )}
                       <button type="button" className="memory-refresh-btn" onClick={() => void onRefresh()}>
                         刷新
                       </button>
@@ -409,10 +502,33 @@ function FileMemoryLibraryPanel({
                       })()}
                     </div>
                   </div>
+                  {bubbleSelectionMode && (
+                    <div className="chat-bubble-selection-bar">
+                      <span style={{ fontSize: 12, color: '#71717a' }}>
+                        {selectedBubbleIndices.length > 0 ? `已选 ${selectedBubbleIndices.length} 条` : '点击气泡选择'}
+                      </span>
+                      {selectedBubbleIndices.length > 0 && (
+                        <button
+                          type="button"
+                          className="memory-refresh-btn danger"
+                          onClick={() => void deleteBubbles(selectedBubbleIndices)}
+                          disabled={deletingBubbles}
+                        >
+                          {deletingBubbles ? '删除中...' : `删除选中 (${selectedBubbleIndices.length})`}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {detailLoading ? (
                     <p style={{ color: '#71717a', fontSize: 13 }}>正在读取详情...</p>
                   ) : detail.bubbles && detail.bubbles.length > 0 ? (
-                    <ChatBubbleList bubbles={detail.bubbles} />
+                    <ChatBubbleList
+                      bubbles={detail.bubbles}
+                      selectionMode={bubbleSelectionMode}
+                      selectedIndices={selectedBubbleIndices}
+                      onToggleSelect={toggleBubbleIndex}
+                      onContextMenu={(sourceIndex, x, y) => setBubbleMenu({ x, y, sourceIndex })}
+                    />
                   ) : (
                     <pre className="memory-detail-content">{detail.content}</pre>
                   )}
@@ -423,6 +539,7 @@ function FileMemoryLibraryPanel({
         )}
       </section>
 
+      {/* 列表右键菜单 */}
       {menu && (
         <div
           className="memory-context-menu"
@@ -434,6 +551,22 @@ function FileMemoryLibraryPanel({
             onClick={() => void handleDelete(menu.item)}
           >
             删除
+          </button>
+        </div>
+      )}
+
+      {/* 气泡右键菜单 */}
+      {bubbleMenu && (
+        <div
+          className="memory-context-menu"
+          style={{ left: `${bubbleMenu.x}px`, top: `${bubbleMenu.y}px` }}
+        >
+          <button
+            type="button"
+            className="memory-context-action danger"
+            onClick={() => void deleteBubbles([bubbleMenu.sourceIndex])}
+          >
+            删除此消息
           </button>
         </div>
       )}
@@ -457,10 +590,31 @@ function formatTimestamp(value: string): string {
 function formatBubbleTime(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(date)
+  const isCurrentYear = date.getFullYear() === new Date().getFullYear()
+  return new Intl.DateTimeFormat('zh-CN', {
+    ...(isCurrentYear ? {} : { year: 'numeric' }),
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
 }
 
-function ChatBubbleList({ bubbles }: { bubbles: ChatBubble[] }): JSX.Element {
+interface ChatBubbleListProps {
+  bubbles: ChatBubble[]
+  selectionMode: boolean
+  selectedIndices: number[]
+  onToggleSelect: (sourceIndex: number) => void
+  onContextMenu: (sourceIndex: number, x: number, y: number) => void
+}
+
+function ChatBubbleList({
+  bubbles,
+  selectionMode,
+  selectedIndices,
+  onToggleSelect,
+  onContextMenu
+}: ChatBubbleListProps): JSX.Element {
   const items: JSX.Element[] = []
   let lastTs: number | null = null
   let lastSender = ''
@@ -485,12 +639,33 @@ function ChatBubbleList({ bubbles }: { bubbles: ChatBubble[] }): JSX.Element {
     const isMe = bubble.sender === 'user'
     const sameGroup = bubble.name === lastSender
     lastSender = bubble.name
+    const isSelected = selectedIndices.includes(bubble.sourceIndex)
 
     items.push(
       <div
         key={i}
-        className={`chat-bubble ${isMe ? 'chat-bubble-me' : 'chat-bubble-other'}${sameGroup ? ' chat-bubble-grouped' : ''}`}
+        className={[
+          'chat-bubble',
+          isMe ? 'chat-bubble-me' : 'chat-bubble-other',
+          sameGroup ? 'chat-bubble-grouped' : '',
+          selectionMode ? 'chat-bubble-selectable' : '',
+          isSelected ? 'chat-bubble-selected' : ''
+        ].filter(Boolean).join(' ')}
+        onClick={selectionMode ? () => onToggleSelect(bubble.sourceIndex) : undefined}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onContextMenu(bubble.sourceIndex, e.clientX, e.clientY)
+        }}
       >
+        {selectionMode && (
+          <input
+            type="checkbox"
+            className="chat-bubble-checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(bubble.sourceIndex)}
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
         <div className={`chat-bubble-avatar${isMe ? ' chat-bubble-avatar-me' : ''}${sameGroup ? ' hidden' : ''}`}>
           {bubble.name.slice(0, 1)}
         </div>
