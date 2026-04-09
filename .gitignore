@@ -5,6 +5,9 @@
 memory/cache/
 social_copilot/cache/*
 !social_copilot/cache/.gitkeep
+social_copilot/frontend/social_copilot/**
+!social_copilot/frontend/social_copilot/**/
+!social_copilot/frontend/social_copilot/**/.gitkeep
 memory/chat_records/
 memory/memory_library/
 memory/evermemos/tmp_*
