@@ -1,6 +1,7 @@
 # Runtime state
 .socialclaw-stack/
 .socialclaw-logs/
+.socialclaw/
 memory/cache/
 memory/chat_records/
 memory/memory_library/
@@ -39,3 +40,4 @@ logs/
 .learnings/
 .claude/
 .codex/
+docs/superpowers/

@@ -75,6 +75,7 @@ import {
 } from './cleanup-local-data'
 import { listProviderModels, probeProviderConnection } from './model-provider'
 import { buildVisualMonitorConfigPatchPayload } from './visual-monitor-config-patch'
+import { buildEverMemOSConfigSyncRequests } from './evermemos-config-sync'
 import { createDipToScreenPointMapper, dipRectToScreenRect } from './coordinate-utils'
 import { buildVisionFailureMessage, buildVisionSkipMessage, formatVisionStreamStrategy } from './vision-test-feedback'
 
@@ -298,6 +299,8 @@ export async function initializeApplication(): Promise<{
   // Load settings to check if this is first run (Requirement 1.1)
   const settings = await memoryManager.loadSettings()
   const isFirstRun = !settings.onboardingComplete
+
+  await syncSavedSettingsToRunningBackends(settings)
 
   // Load user profile (creates default if doesn't exist - Requirement 4.1)
   await memoryManager.loadUserProfile()
@@ -1911,6 +1914,7 @@ async function handleHotRunUpdateSettings(
   await ensureStorageDirectories(settings)
   await hotRunService.updateSettings(settings)
   await syncSettingsToVisualMonitorBackend(settings)
+  await syncSettingsToEverMemOSBackend(settings)
 }
 
 /**
@@ -2311,30 +2315,40 @@ async function syncSettingsToEverMemOSBackend(settings: AppSettings): Promise<vo
     return
   }
 
-  try {
-    const response = await fetch(`${baseUrl}/api/v1/copilot/config/llm`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        base_url: settings.evermemos.llm.baseUrl,
-        api_key: settings.evermemos.llm.apiKey,
-        model: settings.evermemos.llm.model,
-        temperature: settings.evermemos.llm.temperature,
-        max_tokens: settings.evermemos.llm.maxTokens
+  for (const request of buildEverMemOSConfigSyncRequests(settings)) {
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/copilot/config/${request.endpoint}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(request.payload)
       })
-    })
 
-    if (!response.ok) {
-      const body = await response.text()
-      throw new Error(`Service returned ${response.status}: ${body}`)
+      if (!response.ok) {
+        const body = await response.text()
+        throw new Error(`Service returned ${response.status}: ${body}`)
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `Settings were saved, but syncing EverMemOS ${request.label} config failed (${baseUrl}). Original error: ${reason}`
+      )
     }
+  }
+}
+
+async function syncSavedSettingsToRunningBackends(settings: AppSettings): Promise<void> {
+  try {
+    await syncSettingsToVisualMonitorBackend(settings)
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(
-      `Settings were saved, but syncing EverMemOS LLM config failed (${baseUrl}). Original error: ${reason}`
-    )
+    console.warn('Skipped visual monitor startup sync:', error)
+  }
+
+  try {
+    await syncSettingsToEverMemOSBackend(settings)
+  } catch (error) {
+    console.warn('Skipped EverMemOS startup sync:', error)
   }
 }
 

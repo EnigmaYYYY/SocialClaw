@@ -2,7 +2,7 @@
 
 # SocialClaw
 
-[中文主版](./README.md) | [English README](./README_EN.md)
+[中文](./README.md) | [English](./README_EN.md)
 
 </div>
 
@@ -136,28 +136,22 @@ In short, SocialClaw is better for conversations that deserve thought, not conve
 
 ### Recommended Setup Order
 
-Before using the startup scripts, prepare the environment first. The scripts are meant to launch services, not guess your local Python / Node setup.
+SocialClaw now recommends a **CLI-first + UI-first** path:
 
-### 1. Prepare The Root Config
+- use the CLI to check prerequisites, generate local bootstrap config, and launch the stack
+- use the settings UI to fill in Assistant / VLM / EverMemOS model endpoints and API keys
+- keep `.env` files as bootstrap / advanced config entry points instead of the default first-run path
+
+### 1. Clone The Repository
 
 ```bash
-git clone <your-repo-url> SocialClaw
+git clone https://github.com/EnigmaYYYY/SocialClaw.git
 cd SocialClaw
-cp .env.example .env
 ```
 
-Then edit `.env` and fill in at least:
+### 2. Prepare The Runtime Environment
 
-- assistant model endpoint and API key
-- vision model endpoint and API key
-- memory-side LLM settings
-- embedding and rerank settings, if needed
-
-### 2. Prepare The Visual Monitor Python Environment
-
-The repository expects a Conda environment for the Visual Monitor side. The recommended name is `social_copilot`.
-
-Example:
+Prepare the Visual Monitor Python environment:
 
 ```bash
 conda create -n social_copilot python=3.12 -y
@@ -165,124 +159,163 @@ conda activate social_copilot
 pip install -r social_copilot/visual_monitor/requirements.txt
 ```
 
-On macOS, the shell startup script defaults to:
+Install the EverMemOS runtime:
+
+```bash
+cd memory/evermemos
+uv sync
+cd ../..
+```
+
+Install frontend dependencies:
+
+```bash
+cd social_copilot/frontend
+npm install
+cd ../..
+```
+
+### 3. Initialize Local Bootstrap Config
+
+```bash
+npm run doctor
+npm run init
+```
+
+This step will:
+
+- check Node, Docker, `uv`, and Python prerequisites
+- generate missing `.env` and `memory/evermemos/.env` files
+- create local CLI config at `.socialclaw/config.json`
+
+On macOS, the CLI prefers:
 
 ```bash
 /Applications/miniconda3/envs/social_copilot/bin/python
 ```
 
-If your Python path is different, set `VISUAL_MONITOR_PYTHON` before running the script.
+If your Visual Monitor Python path is different, edit `.socialclaw/config.json`.
 
-### 3. Prepare EverMemOS
-
-EverMemOS has its own environment template and Docker-backed data stores.
+### 4. Start The Full Stack
 
 ```bash
-cd memory/evermemos
-cp env.template .env
+npm run start
 ```
 
-Then edit `memory/evermemos/.env` and verify the model and datastore settings.
-
-Install the EverMemOS runtime with `uv`:
-
-```bash
-uv sync
-```
-
-### 4. Prepare The Frontend
-
-```bash
-cd social_copilot/frontend
-npm install
-```
-
-## Recommended Startup Paths
-
-### Windows
-
-Recommended launcher:
-
-```powershell
-scripts\start_social_stack.cmd
-```
-
-Or directly:
-
-```powershell
-.\scripts\start_social_stack.ps1
-```
-
-Important note:
-
-- the Windows PowerShell script contains local executable path parameters for Python and Node
-- if your environment paths differ, edit the defaults at the top of the script or pass your own values explicitly
-
-Typical parameters you may need to adjust:
-
-- `VisualMonitorPython`
-- `EverMemOSPython`
-- `NodeExe`
-- `NpmCmd`
-
-This startup path is intended to launch:
+This launches:
 
 - EverMemOS Docker dependencies
 - EverMemOS API
 - Visual Monitor API
 - Electron frontend dev process
 
-To stop the stack:
+Stop the stack with:
 
-```powershell
-scripts\stop_social_stack.cmd
+```bash
+npm run stop
 ```
 
-Or:
+### 5. Configure Model Providers In The UI
+
+After startup, open the settings page and fill in:
+
+- Assistant model endpoint / API key / model
+- Vision model endpoint / API key / model
+- EverMemOS LLM / Vectorize / Rerank config
+
+Saving these values will persist them locally and sync them to the running backends.
+
+That means the default path no longer requires filling two `.env` files with model secrets before first launch.
+
+## CLI Commands
+
+### Global npm Installation
+
+If you install the launcher globally from npm, the default flow becomes:
+
+```bash
+npm install -g socialclaw
+socialclaw init
+socialclaw doctor
+socialclaw start
+socialclaw stop
+```
+
+`socialclaw init` will bootstrap a local project workspace and remember its root path for later CLI use.  
+If you want to choose the target directory explicitly:
+
+```bash
+socialclaw init --project-dir /your/path/SocialClaw
+```
+
+After that, you can keep using `socialclaw doctor/start/stop` even when you are not standing inside the repository directory.
+
+### Git Clone Workflow
+
+If you cloned the repository directly, the local workflow stays the same:
+
+```bash
+npm run doctor
+npm run init
+npm run start
+npm run stop
+```
+
+### Windows
+
+If you install the launcher globally, the commands are:
 
 ```powershell
-.\scripts\stop_social_stack.ps1
+socialclaw doctor
+socialclaw init
+socialclaw start
+socialclaw stop
 ```
+
+Inside the repository today, the local equivalents are:
+
+```powershell
+npm run doctor
+npm run init
+npm run start
+npm run stop
+```
+
+The existing Windows launchers remain available:
+
+- `scripts\start_social_stack.cmd`
+- `.\scripts\start_social_stack.ps1`
 
 ### macOS / shell environments
 
-Recommended backend launcher:
+On macOS / shell environments, the CLI wraps the existing scripts:
+
+- backend launcher: `./scripts/start_socialclaw.sh`
+- frontend launcher: `cd social_copilot/frontend && npm run dev`
+
+If you only want the backend services:
 
 ```bash
-./scripts/start_socialclaw.sh
+node ./bin/socialclaw.js start --backend-only
 ```
 
-This script starts the backend stack and waits for health checks to pass:
-
-- EverMemOS Docker dependencies
-- EverMemOS API
-- Visual Monitor API
-
-Then start the frontend separately:
+Stop the stack with:
 
 ```bash
-cd social_copilot/frontend
-npm run dev
-```
-
-To stop the backend services:
-
-```bash
-./scripts/stop_socialclaw.sh
+node ./bin/socialclaw.js stop
 ```
 
 ## Manual Startup
 
 Use the manual path only if you want custom deployment control.
 
-1. Clone the repo and create `.env` from `.env.example`
-2. Prepare the Conda environment for Visual Monitor
-3. Prepare `memory/evermemos/.env` from `env.template`
-4. Start EverMemOS Docker dependencies in `memory/evermemos`
-5. Start EverMemOS API on `127.0.0.1:1995`
-6. Start Visual Monitor API on `127.0.0.1:18777`
-7. Start the Electron frontend in `social_copilot/frontend`
-8. Open Settings in the app and verify the assistant model, vision model, and API endpoints
+1. Prepare the Conda environment for Visual Monitor
+2. Prepare `memory/evermemos/.env` and start EverMemOS Docker dependencies
+3. Start EverMemOS API on `127.0.0.1:1995`
+4. Start Visual Monitor API on `127.0.0.1:18777`
+5. Start the Electron frontend in `social_copilot/frontend`
+6. Configure Assistant, VLM, and EverMemOS model settings in the UI
+7. Only edit the root `.env` when you need headless or advanced service-side control
 
 ## Minimum Requirements
 
@@ -327,7 +360,13 @@ The app also exposes `stream` / `non_stream` strategy controls for assistant and
 
 ## Configuration
 
-The root `.env` is the main shared configuration entry point.
+The default recommendation is to use the settings UI as the primary model configuration entry point.
+
+The root `.env` and `memory/evermemos/.env` are now better treated as:
+
+- bootstrap files for first-time local setup
+- advanced environment-variable overrides
+- headless or non-UI service debugging
 
 Important groups:
 
@@ -347,7 +386,7 @@ For detailed provider setup, use the [Model Configuration Guide](docs/model/mode
 ```text
 SocialClaw/
 ├── README.md
-├── README_ZN.md
+├── README_EN.md
 ├── LICENSE
 ├── .env.example
 ├── scripts/

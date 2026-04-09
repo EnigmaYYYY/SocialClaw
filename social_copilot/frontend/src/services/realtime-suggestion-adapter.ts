@@ -260,15 +260,10 @@ export class RealtimeSuggestionAdapter {
 
   async stop(): Promise<void> {
     await this.stopMonitoring()
-    this.running = false
     this.currentSessionKey = null
     this.currentContactName = null
     this.currentContactCacheKey = null
     this.currentSkillIdOverride = null
-    if (this.timerId !== null) {
-      window.clearInterval(this.timerId)
-      this.timerId = null
-    }
     this.emitStatus('idle')
   }
 
@@ -312,6 +307,11 @@ export class RealtimeSuggestionAdapter {
       monitorLastError: '',
       monitorLastDecisionReason: '',
     })
+    this.running = false
+    if (this.timerId !== null) {
+      window.clearInterval(this.timerId)
+      this.timerId = null
+    }
     this.emitStatus('idle')
   }
 

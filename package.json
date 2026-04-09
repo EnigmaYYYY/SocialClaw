@@ -1,0 +1,36 @@
+{
+  "name": "socialclaw",
+  "version": "1.0.0",
+  "description": "CLI launcher for the SocialClaw desktop stack",
+  "keywords": [
+    "socialclaw",
+    "social-copilot",
+    "electron",
+    "cli",
+    "desktop-ai"
+  ],
+  "homepage": "https://github.com/EnigmaYYYY/SocialClaw",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EnigmaYYYY/SocialClaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EnigmaYYYY/SocialClaw/issues"
+  },
+  "bin": "bin/socialclaw.js",
+  "scripts": {
+    "doctor": "node ./bin/socialclaw.js doctor",
+    "init": "node ./bin/socialclaw.js init",
+    "start": "node ./bin/socialclaw.js start",
+    "stop": "node ./bin/socialclaw.js stop",
+    "test": "node --test test/*.test.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

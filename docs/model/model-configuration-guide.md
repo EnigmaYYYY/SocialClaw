@@ -10,6 +10,9 @@ SocialClaw uses three types of models, each requiring separate configuration:
 
 All model calls in SocialClaw use the **OpenAI-compatible API protocol** (`/v1/chat/completions`), so you can use any compatible provider.
 
+> Recommended path: use the **Settings UI** as the default model configuration entry point.  
+> Keep `.env` files for bootstrap, headless runs, or advanced service-side overrides.
+
 ---
 
 ## Table of Contents
@@ -181,7 +184,8 @@ SOCIAL_COPILOT_ASSISTANT_MODEL=claude-sonnet-4-5-20250929
 
 ## 2. Configuring Models in .env Files
 
-The `.env` file is SocialClaw's **base-level configuration**, read by all services at startup.
+Use this path when you want headless startup, service-side overrides, or a fully environment-driven deployment.
+For ordinary desktop usage, the recommended path is still the Settings UI.
 
 ### Config File Locations
 

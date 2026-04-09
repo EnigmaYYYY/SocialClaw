@@ -142,28 +142,22 @@ SocialClaw 目前最适合这类对话场景：
 
 ### 推荐顺序
 
-在使用启动脚本之前，先把环境准备好。启动脚本是用来拉起服务的，不会替你自动猜对本机的 Python / Node 路径。
+现在推荐走 **CLI-first + UI-first** 的启动路径：
 
-### 1. 准备根目录配置
+- CLI 负责检查环境、生成本地启动配置、拉起前后端
+- 设置页面负责填写 Assistant / VLM / EverMemOS 的模型接口与 API key
+- 根目录 `.env` 和 `memory/evermemos/.env` 默认只作为 bootstrap / advanced 配置入口，不再要求第一次使用就手工填满
+
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/EnigmaYYYY/SocialClaw.git
 cd SocialClaw
-cp .env.example .env
 ```
 
-然后编辑 `.env`，至少填好：
+### 2. 准备运行环境
 
-- Assistant 模型的接口和 API key
-- Vision 模型的接口和 API key
-- 记忆侧 LLM 配置
-- Embedding / Rerank 配置
-
-### 2. 准备 Visual Monitor 的 Conda 环境
-
-这个项目默认推荐用 Conda 来管理 Visual Monitor 的 Python 环境，推荐环境名为 `social_copilot`。
-
-示例：
+先准备 Visual Monitor 的 Conda 环境：
 
 ```bash
 conda create -n social_copilot python=3.12 -y
@@ -171,67 +165,50 @@ conda activate social_copilot
 pip install -r social_copilot/visual_monitor/requirements.txt
 ```
 
-在 macOS 下，shell 启动脚本默认会使用：
+再安装 EverMemOS 运行环境：
+
+```bash
+cd memory/evermemos
+uv sync
+cd ../..
+```
+
+最后安装前端依赖：
+
+```bash
+cd social_copilot/frontend
+npm install
+cd ../..
+```
+
+### 3. 初始化本地启动配置
+
+```bash
+npm run doctor
+npm run init
+```
+
+这一步会：
+
+- 检查 Node / Docker / `uv` / Python 路径
+- 自动生成缺失的 `.env` 和 `memory/evermemos/.env`
+- 生成本地 CLI 配置 `.socialclaw/config.json`
+
+在 macOS 下，CLI 默认会优先使用：
 
 ```bash
 /Applications/miniconda3/envs/social_copilot/bin/python
 ```
 
-如果你的 Python 路径不同，在 bash 启动文件设置 `VISUAL_MONITOR_PYTHON` 再启动。
+如果你的 Visual Monitor Python 路径不同，直接编辑 `.socialclaw/config.json` 即可。
 
-### 3. 准备 EverMemOS 环境
-
-EverMemOS 自己有一份环境模板和 Docker 依赖。
+### 4. 一键启动整套服务
 
 ```bash
-cd memory/evermemos
-cp env.template .env
+npm run start
 ```
 
-然后编辑 `memory/evermemos/.env`，确认模型和数据存储配置正确。
-
-使用 `uv` 安装 EverMemOS 运行环境：
-
-```bash
-uv sync
-```
-
-### 4. 准备前端
-
-```bash
-cd social_copilot/frontend
-npm install
-```
-
-## 推荐启动方式
-
-### Windows
-
-推荐启动入口：
-
-```powershell
-scripts\start_social_stack.cmd
-```
-
-或者直接运行：
-
-```powershell
-.\scripts\start_social_stack.ps1
-```
-
-注意：
-
-- Windows 的 PowerShell 启动脚本里默认写了 Python 和 Node 的本地路径参数
-- 如果你的环境路径不同，需要先改脚本顶部默认值，或者在执行时显式传入自己的路径
-
-通常你最需要确认的参数有：
-
-- `VisualMonitorPython`
-- `EverMemOSPython`
-- `NodeExe`
-- `NpmCmd`
-
-这套启动链路会拉起：
+这条命令会一键拉起：
 
 - EverMemOS Docker 依赖
 - EverMemOS API
@@ -240,55 +217,122 @@ scripts\start_social_stack.cmd
 
 停止整套服务：
 
+```bash
+npm run stop
+```
+
+### 5. 在设置页填写模型配置
+
+启动后进入主界面的设置页，填写：
+
+- Assistant 模型地址 / API key / 模型名
+- 视觉模型地址 / API key / 模型名
+- EverMemOS LLM / Vectorize / Rerank 模型配置
+
+保存后，这些配置会：
+
+- 持久化到本地应用设置
+- 同步到运行中的 Visual Monitor 后端
+- 同步到运行中的 EverMemOS 后端
+
+也就是说，**默认使用路径下，模型配置不再要求你第一次启动前就手工改两份 `.env`**。
+
+## CLI 命令
+
+### 直接用 npm 安装 CLI
+
+如果后续你通过 npm 全局安装这个 launcher，可以直接这样用：
+
+```bash
+npm install -g socialclaw
+socialclaw init
+socialclaw doctor
+socialclaw start
+socialclaw stop
+```
+
+这里的 `socialclaw init` 会在默认路径下 bootstrap 一份项目工作目录，并记住它的位置。  
+如果你想指定路径：
+
+```bash
+socialclaw init --project-dir /your/path/SocialClaw
+```
+
+之后即使你不在仓库目录里，也可以继续直接运行 `socialclaw doctor/start/stop`。
+
+### Git clone 后直接使用
+
+如果你是直接 clone 仓库，本地用法保持不变：
+
+```bash
+npm run doctor
+npm run init
+npm run start
+npm run stop
+```
+
+### Windows
+
+如果你通过 npm 全局安装，命令名就是：
+
 ```powershell
-scripts\stop_social_stack.cmd
+socialclaw doctor
+socialclaw init
+socialclaw start
+socialclaw stop
+```
+
+在当前仓库内，本地等价命令是：
+
+```powershell
+npm run doctor
+npm run init
+npm run start
+npm run stop
+```
+
+Windows 现有底层脚本仍然可直接使用：
+
+```powershell
+scripts\start_social_stack.cmd
 ```
 
 或者：
 
 ```powershell
-.\scripts\stop_social_stack.ps1
+.\scripts\start_social_stack.ps1
 ```
 
 ### macOS / shell 环境
 
-推荐后端启动入口：
+当前 CLI 在 macOS / shell 下会包装现有脚本：
+
+- 后端底层脚本：`./scripts/start_socialclaw.sh`
+- 前端底层命令：`cd social_copilot/frontend && npm run dev`
+
+如果你只想启动后端，也可以：
 
 ```bash
-./scripts/start_socialclaw.sh
+node ./bin/socialclaw.js start --backend-only
 ```
 
-这个脚本会启动后端链路并做健康检查：
-
-- EverMemOS Docker 依赖
-- EverMemOS API
-- Visual Monitor API
-
-然后单独启动前端：
+停止时：
 
 ```bash
-cd social_copilot/frontend
-npm run dev
-```
-
-停止后端服务：
-
-```bash
-./scripts/stop_socialclaw.sh
+node ./bin/socialclaw.js stop
 ```
 
 ## 手动启动方式
 
 如果你想自己控制每个服务，再走手动方式：
 
-1. 克隆仓库，并用 `.env.example` 生成 `.env`
-2. 准备 Visual Monitor 的 Conda 环境
-3. 用 `env.template` 生成 `memory/evermemos/.env`
-4. 在 `memory/evermemos` 中启动 Docker 依赖
-5. 启动 EverMemOS API，默认 `127.0.0.1:1995`
-6. 启动 Visual Monitor API，默认 `127.0.0.1:18777`
-7. 在 `social_copilot/frontend` 中启动 Electron 前端
-8. 进入设置页面确认 Assistant、VLM 和 EverMemOS 端点配置正确
+1. 先准备 Visual Monitor 的 Conda 环境
+2. 在 `memory/evermemos` 里准备 `.env` 并启动 Docker 依赖
+3. 启动 EverMemOS API，默认 `127.0.0.1:1995`
+4. 启动 Visual Monitor API，默认 `127.0.0.1:18777`
+5. 在 `social_copilot/frontend` 中启动 Electron 前端
+6. 进入设置页面填写 Assistant、VLM 和 EverMemOS 模型配置
+7. 只有在需要 headless / 高级控制时，再去编辑根目录 `.env`
 
 ## 最低环境要求
 
@@ -333,7 +377,13 @@ SocialClaw 实际上分了三类模型角色：
 
 ## 配置入口
 
-根目录 `.env` 是全局共享配置入口。
+默认推荐把 **设置页面** 作为模型配置主入口。
+
+根目录 `.env` 和 `memory/evermemos/.env` 现在更适合这些场景：
+
+- headless / 脚本化启动
+- 高级用户做统一环境变量管理
+- 不通过 UI 的服务侧调试
 
 最关键的配置分组：
 
@@ -353,7 +403,7 @@ SocialClaw 实际上分了三类模型角色：
 ```text
 SocialClaw/
 ├── README.md
-├── README_ZN.md
+├── README_EN.md
 ├── LICENSE
 ├── .env.example
 ├── scripts/
